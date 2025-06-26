@@ -35,6 +35,8 @@ routing and disaggregated serving.
 
 ### Non-Goals
 
+* **Comprehensive Internal Instrumentation**: This proposal focuses on end-to-end visibility through ingress/egress tracing, not exhaustive instrumentation of every internal operation, function call, or database query within components.
+
 * **Metrics Collection**: This proposal focuses on distributed tracing, not metrics collection, though OpenTelemetry collectors can export to both.
 
 * **Log Aggregation**: While OpenTelemetry supports logs, this proposal addresses distributed tracing only.
@@ -93,6 +95,10 @@ vendor-agnostic standard for collecting and generating telemetry data. OpenTelem
 The instrumentation strategy focuses on the critical path of LLM inference requests through the llm-d stack,
 covering key components responsible for routing, caching, and serving.
 
+**Implementation Approach:**
+Initial implementation will focus on ingress/egress instrumentation to establish end-to-end visibility with minimal complexity.
+Implementation prioritizes request entry and exit points from each component rather than internal operation tracing.
+
 **Current Implementation Status Summary:**
 - **Inference Gateway (gateway-api-inference-extension)**: Has OpenTelemetry dependencies, needs activation
 - **llm-d-inference-scheduler (EPP)**: Has OpenTelemetry dependencies, needs activation
@@ -115,16 +121,13 @@ intelligent endpoint selection decisions.
   * **Instrumentation Focus**: This component is responsible for making smart load-balancing and routing decisions,
 applying filtering and scoring algorithms based on awareness of P/D, KV-cache, SLA, and load.
 
-  * **Requests to Instrument**: Trace the lifecycle of routing requests as they:
-    - Enter the EPP gRPC service from the Inference Gateway
-    - Flow through the scheduler's internal logic
-    - Execute various filter and scorer plugins
-    - Result in endpoint selection decisions
-
+  * **Requests to Instrument**:
+    - Request entry into the EPP gRPC service from the Inference Gateway
+    - Final endpoint selection response back to the Inference Gateway
+    - Request duration and basic success/failure status
+ 
   * **Key Spans and Attributes**:
     - EPP gRPC request receipt and processing
-    - Filter plugin execution (each filter as a child span)
-    - Scorer plugin execution and ranking
     - Final endpoint selection decision
     - Response back to Inference Gateway
 
@@ -139,14 +142,16 @@ instances with relevant cached data efficiently?).
   * **Instrumentation Focus**: This component manages a global view of KV cache states and localities, for optimizing LLM inference by reusing
 computed key/value attention vectors. It interacts with storage to index KV block availability.
 
-  * **Requests to Instrument**: Instrument operations related to KV cache lookups, cache hits/misses, KV data transfer between instances.
+  * **Requests to Instrument**:
+    - Cache lookup operations (finding pods with relevant KV blocks)
+    - Cache management operations
+    - Pod scoring and routing decisions based on cache hits
+    - Request duration and basic success/failure status
 
   * **Key Spans and Attributes**:
-    - Cache key computation and lookup
-    - Cache hit/miss determination
-    - Cache data retrieval and transfer
-    - Cache state updates and synchronization
-    - Operations for cache indexing
+    - Cache operation request receipt and processing
+    - Cache hit/miss status
+    - Cache operation completion and response
 
   * **Benefit**: Tracing will reveal the efficacy of KV-caching strategies, identifying potential bottlenecks in cache access or transfer, and
 quantifying the performance gains from cache hits. This is directly tied to improving latency and reducing resource consumption.
@@ -158,14 +163,15 @@ quantifying the performance gains from cache hits. This is directly tied to impr
   * **Instrumentation Focus**: This component acts as a reverse proxy for P/D (Prefill/Decode) disaggregation, redirecting requests to the appropriate
 prefill worker. This component is deployed when P/D disaggregation is enabled.
 
-  * **Requests to Instrument**: Trace requests as they pass through the routing proxy, capturing the latency introduced by the proxy and the handoff mechanism
-between the prefill and decode workers.
+  * **Requests to Instrument**:
+    - Request entry into the routing proxy
+    - Request forwarding to prefill worker
+    - Request duration and basic success/failure status
 
   * **Key Spans and Attributes**:
-    - Request proxy and routing decisions
-    - Prefill worker selection and communication
-    - Decode worker handoff coordination
-    - Inter-component communication latency
+    - Routing proxy request receipt and processing
+    - Prefill worker selection and forwarding
+    - Request completion status
 
   * **Benefit**: Tracing behavior of the routing proxy will provide data on the performance characteristics of P/D disaggregation with
 technologies like NVIDIA NIXL, informing future design choices for latency-optimized or throughput-optimized implementations.
@@ -178,16 +184,17 @@ technologies like NVIDIA NIXL, informing future design choices for latency-optim
   * **Instrumentation Focus**: llm-d leverages vLLM as its reference LLM inference engine. This proposal advocates for restoring OpenTelemetry tracing
 support in vLLM v1 given its importance for LLM observability.
 
-  * **Requests to Instrument**: Utilize and potentially enhance existing vLLM instrumentation for every inference request, capturing granular timings
-like queue time, prefill time, decode time, time to first token (TTFT), and inter-token latency (ITL).
+  * **Requests to Instrument**:
+    - Inference request entry into vLLM
+    - Inference response completion from vLLM
+    - Request duration and basic success/failure status
+    - Token counts for cost attribution
 
   * **Key Spans and Attributes**:
-    - `gen_ai.latency.time_in_model_forward`
-    - `gen_ai.latency.time_in_model_execute`
-    - Request queuing and scheduling
-    - Model loading and initialization
-    - Token generation phases (prefill vs decode)
-    - Memory allocation and GPU utilization
+    - vLLM inference request receipt and processing
+    - `gen_ai.usage.input_tokens` and `gen_ai.usage.output_tokens`
+    - Request completion status and duration
+    - Basic model performance metrics
 
   * **Benefit**: This provides the fundamental performance data at the model serving layer, allowing for detailed analysis of model execution, and
 validating the impact of llm-d's optimizations (like P/D disaggregation and prefix caching) on the actual vLLM inference process. It also provides
@@ -204,17 +211,17 @@ token usage attributes for cost analysis.
   * **Instrumentation Focus**: This component serves as the entry point for inference requests, providing
 optimized routing and load balancing.
 
-  * **Requests to Instrument**: Trace the complete lifecycle of inference requests as they:
-    - Enter through the gateway
-    - Execute EPP routing decisions with llm-d scheduler integration
-    - Result in endpoint selection and request forwarding
+  * **Requests to Instrument**:
+    - Request entry through the gateway
+    - EPP routing decision execution
+    - Request forwarding to selected model instance
+    - Request duration and basic success/failure status
 
   * **Key Spans and Attributes**:
     - Gateway request receipt and processing
-    - EPP gRPC service request processing
-    - llm-d scheduler filter and scorer plugin execution
-    - Final endpoint selection and routing
+    - EPP routing decision and endpoint selection
     - Request forwarding to selected model instance
+    - Request completion status
 
   * **Benefit**: Provides complete end-to-end visibility from the Kubernetes ingress layer through 
 the intelligent routing decisions, enabling validation of advanced scheduling optimizations like
@@ -245,6 +252,8 @@ tracing:
   apiToken: ""
   samplingRate: 0.1
   detailedTracing: false
+  # Always propagate trace context, even when component tracing is disabled
+  alwaysPropagateContext: true
   components:
     eppInferenceScheduler: true
     kvCacheManager: true
