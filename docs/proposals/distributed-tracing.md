@@ -254,7 +254,6 @@ tracing:
   otelCollectorEndpoint: "http://otel-collector:4317"
   apiToken: ""
   samplingRate: 0.1
-  detailedTracing: false
   components:
     eppInferenceScheduler: true
     kvCacheManager: true
