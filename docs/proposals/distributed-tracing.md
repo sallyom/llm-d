@@ -73,6 +73,9 @@ I can optimize my prompt engineering and model selection to reduce operational e
 As an llm-d developer validating new optimizations, I want to measure the impact of KV-cache aware routing and P/D disaggregation on request 
 latency so that I can quantify the benefits of these advanced features.
 
+#### Story 4
+
+As an llm-d developer/administrator, I have noticed a significant change in performance since the last upgrade. I want to compare the execution, caching and decision-making in routing between the two releases.
 ## Design Details
 
 ### llm-d Stack
@@ -252,8 +255,6 @@ tracing:
   apiToken: ""
   samplingRate: 0.1
   detailedTracing: false
-  # Always propagate trace context, even when component tracing is disabled
-  alwaysPropagateContext: true
   components:
     eppInferenceScheduler: true
     kvCacheManager: true
