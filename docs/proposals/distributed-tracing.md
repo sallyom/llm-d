@@ -126,17 +126,18 @@ applying filtering and scoring algorithms based on awareness of P/D, KV-cache, S
 
   * **Requests to Instrument**:
     - Request entry into the EPP gRPC service from the Inference Gateway
-    - Final endpoint selection response back to the Inference Gateway
+    - Prefill pod selection decision for P/D disaggregation
+    - Decode pod selection and response
     - Request duration and basic success/failure status
  
   * **Key Spans and Attributes**:
     - EPP gRPC request receipt and processing
-    - Final endpoint selection decision
-    - Response back to Inference Gateway
+    - P/D prefill pod selection decision
+    - Decode pod selection decision and response
 
   * **Benefit**: This will provide insights into why a particular model instance was chosen (or not chosen), quantify the overhead
 of scheduling decisions, and help validate and optimize the complex routing logic (e.g., is KV-cache aware routing actually directing requests to
-instances with relevant cached data efficiently?).
+instances with relevant cached data efficiently?). This will provide visibility into disaggregated serving decisions.
 
 #### **Component: `llm-d-kv-cache-manager`**
 
@@ -168,12 +169,14 @@ prefill worker. This component is deployed when P/D disaggregation is enabled.
 
   * **Requests to Instrument**:
     - Request entry into the routing proxy
-    - Request forwarding to prefill worker
+    - Request forwarding to prefill pod
+    - Request forwarding to decode pod
     - Request duration and basic success/failure status
 
   * **Key Spans and Attributes**:
     - Routing proxy request receipt and processing
-    - Prefill worker selection and forwarding
+    - Prefill pod forwarding
+    - Decode pod forwarding
     - Request completion status
 
   * **Benefit**: Tracing behavior of the routing proxy will provide data on the performance characteristics of P/D disaggregation with
