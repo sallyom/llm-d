@@ -84,3 +84,16 @@ Grafana dashboard raw JSON files can be imported manually into a Grafana UI. Her
   - vLLM metrics
 - [inference-gateway dashboard](https://github.com/kubernetes-sigs/gateway-api-inference-extension/blob/main/tools/dashboards/inference_gateway.json)
   - EPP pod metrics, requires additional setup to collect metrics. See [GAIE doc](https://github.com/kubernetes-sigs/gateway-api-inference-extension/blob/main/tools/dashboards/README.md)
+
+## PromQL Query Examples
+
+For specific PromQL queries to monitor LLM-D deployments, see:
+
+- [Example PromQL Queries](./example-promQL-queries.md) - Ready-to-use queries for monitoring vLLM, EPP, and prefix caching metrics
+
+## Load Testing and Error Generation
+
+To populate metrics (especially error metrics) for testing and monitoring validation:
+
+- [Load Generation Script](./scripts/generate-load-llmd.sh) - Sends both valid and malformed requests to generate metrics
+
