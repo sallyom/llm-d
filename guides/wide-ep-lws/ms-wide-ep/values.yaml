@@ -66,6 +66,14 @@ routing:
           - pluginRef: queue-scorer
             weight: 1.0
           - pluginRef: max-score-picker
+
+    # Monitoring configuration for EPP
+    monitoring:
+      # ServiceMonitor configuration for EPP metrics collection with Prometheus Operator
+      servicemonitor:
+        enabled: false
+        interval: "10s"
+
 decode:
   create: true
   replicas: 1
