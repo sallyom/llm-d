@@ -17,7 +17,10 @@ Please join [SIG-Observability](https://github.com/llm-d/llm-d/blob/dev/SIGS.md#
 ### Helmfile Integration
 
 Provided Prometheus custom resources exist in the cluster, all [llm-d guides](../../guides/README.md) include the option to enable Prometheus
-PodMonitor creation for scraping vLLM metrics. With any llm-d helmfile example, update the modelservice values to enable monitoring:
+PodMonitor creation for scraping vLLM metrics and ServiceMonitor creation for scraping EPP (Endpoint Picker Protocol) metrics.
+With any llm-d helmfile example, update the values to enable monitoring:
+
+### vLLM Metrics
 
 ```yaml
 # In your ms-*/values.yaml files
@@ -39,6 +42,39 @@ kubectl get podmonitors -n my-llm-d-namespace
 ```
 
 The vLLM metrics from prefill and decode pods will be visible from the Prometheus and/or Grafana user interface.
+
+### EPP (Endpoint Picker Protocol) Metrics
+
+EPP provides additional metrics for request routing, scheduling latency, and plugin performance. To enable EPP metrics collection:
+
+**For Gateway API Inference Extension (GAIE) deployments:**
+
+```yaml
+# In your gaie-*/values.yaml files
+inferenceExtension:
+  monitoring:
+    prometheus:
+      enabled: true
+```
+
+**For modelservice deployments with EPP:**
+
+```yaml
+# In your ms-*/values.yaml files (for deployments that include EPP)
+routing:
+  epp:
+    monitoring:
+      servicemonitor:
+        enabled: true
+```
+
+Upon installation, view EPP servicemonitors with:
+
+```bash
+kubectl get servicemonitors -n my-llm-d-namespace
+```
+
+EPP metrics include request rates, error rates, scheduling latency, and plugin processing times, providing insights into the inference routing and scheduling performance.
 
 ## Dashboards
 
