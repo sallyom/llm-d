@@ -47,7 +47,7 @@ The vLLM metrics from prefill and decode pods will be visible from the Prometheu
 
 EPP provides additional metrics for request routing, scheduling latency, and plugin performance. To enable EPP metrics collection:
 
-**For Gateway API Inference Extension (GAIE) deployments:**
+**For Gateway API Inference Extension (GAIE) deployments of EPP:**
 
 ```yaml
 # In your gaie-*/values.yaml files
@@ -55,17 +55,6 @@ inferenceExtension:
   monitoring:
     prometheus:
       enabled: true
-```
-
-**For modelservice deployments with EPP:**
-
-```yaml
-# In your ms-*/values.yaml files (for deployments that include EPP)
-routing:
-  epp:
-    monitoring:
-      servicemonitor:
-        enabled: true
 ```
 
 Upon installation, view EPP servicemonitors with:
