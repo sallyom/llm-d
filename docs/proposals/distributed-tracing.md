@@ -163,7 +163,7 @@ Based on working branch prototypes, each component implements:
 - Zero-configuration operation compatible with external auto-instrumentation agents
 
 **Proposed Examples:**
-- **llm-d-kv-cache-manager**: Detailed spans for `GetPodScores`, cache lookups, and scoring algorithms
+- **llm-d-kv-cache-manager**: Detailed spans for `GetPodScores` with sub-operations (`find_tokens`, `tokens_to_block_keys`, `lookup_pods`, `score_pods`)
 - **llm-d-inference-scheduler**: EPP pre-request plugin spans with P/D disaggregation tracking
 - **llm-d-routing-sidecar (P/D Proxy)**: HTTP instrumentation via `otelhttp` with custom protocol spans
 - **vLLM v1**: Tracer initialization and output processor integration
@@ -189,8 +189,6 @@ applying filtering and scoring algorithms based on awareness of P/D, KV-cache, S
     - **Context Propagation**: Maintains trace context across EPP operations and downstream calls using global tracer
     - **Benefit**: Establishes EPP visibility in end-to-end traces, P/D disaggregation tracking with zero configuration
 
-  * **Future Enhancement Opportunities**:
-    Component owners can add detailed spans for EPP gRPC requests, pod selection decisions, routing logic, and filter operations. Advanced attributes could include routing decision details, algorithm execution timing, and optimization effectiveness metrics.
 
 #### **`llm-d-kv-cache-manager`**
 
@@ -199,17 +197,25 @@ applying filtering and scoring algorithms based on awareness of P/D, KV-cache, S
 
   * **Auto-instrumentation Implementation**:
     - **Tracing Infrastructure**: Auto-instrumentation using `otel.Tracer("llm-d-kv-cache-manager")` without explicit initialization
-    - **Initial Spans**: `llm_d.kv_cache_manager.GetPodScores` operation (entry → response)
+    - **Initial Spans**:
+      - `llm_d.kv_cache_manager.GetPodScores`: Main cache scoring operation (entry → response)
+      - `llm_d.kv_cache_manager.find_tokens`: Tokenization operation with token count metrics
+      - `llm_d.kv_cache_manager.tokens_to_block_keys`: Block key generation from tokens
+      - `llm_d.kv_cache_manager.lookup_pods`: Storage lookup operations for KV block availability
+      - `llm_d.kv_cache_manager.score_pods`: Pod scoring algorithm execution
     - **Basic Attributes**:
-      - `gen_ai.request.model`: Model identifier
-      - `llm_d.kv_cache_manager.hit_ratio`: Cache hit ratio for the request
-      - `llm_d.kv_cache_manager.pod_count`: Number of pods considered
-      - `operation.outcome`: success/error/timeout
+      - `gen_ai.request.model`: Model identifier (all spans)
+      - `llm_d.kv_cache_manager.hit_ratio`: Cache hit ratio for the request (GetPodScores span)
+      - `llm_d.kv_cache_manager.pod_count`: Number of pods considered (GetPodScores span)
+      - `llm_d.kv_cache_manager.tokens_found`: Number of tokens found during tokenization
+      - `llm_d.kv_cache_manager.input_tokens`: Input token count for block key generation
+      - `llm_d.kv_cache_manager.block_keys_generated`: Number of block keys generated
+      - `llm_d.kv_cache_manager.block_keys_count`: Block keys used for lookup/scoring
+      - `llm_d.kv_cache_manager.lookup_results`: Number of lookup results from storage
+      - `llm_d.kv_cache_manager.scored_pods`: Number of pods that received scores
+      - `operation.outcome`: success/error/timeout (all spans)
     - **Context Propagation**: Maintains trace context across cache operations using global tracer
-    - **Benefit**: Establishes KV cache manager visibility in end-to-end traces with zero configuration
-
-  * **Future Enhancement Opportunities**:
-    Component owners can add detailed spans for cache lookup operations and scoring algorithms. Enhanced attributes could include cache hit metrics and lookup timing data.
+    - **Benefit**: Provides granular performance analysis of KV cache operations with detailed sub-operation visibility for production debugging
 
 #### **`P/D Proxy (llm-d-routing-sidecar)` - Transitional**
 
@@ -253,9 +259,6 @@ applying filtering and scoring algorithms based on awareness of P/D, KV-cache, S
     - **Context Propagation**: Create root trace context, propagate to EPP and model instances using global tracer
     - **Benefit**: Establishes gateway entry point visibility in end-to-end traces with zero configuration
 
-  * **Future Enhancement Opportunities**:
-    Component owners can add detailed spans for request parsing, model instance selection, and request/response transformations. Enhanced attributes could include
-    token usage metrics, routing algorithms, load balancing decisions, and payload sizes.
 
 ### Enabling Distributed Tracing
 
@@ -302,22 +305,36 @@ Auto-instrumentation has minimal overhead when no tracing agent is present:
 
 The implementation follows OpenTelemetry semantic conventions for GenAI operations:
 
-**Core Attributes** (implemented across components):
-- `gen_ai.request.model`: Model identifier (KV cache manager, vLLM)
+**OpenTelemetry Standard Attributes** (implemented across components):
+- `gen_ai.request.model`: Model identifier (all components)
 - `gen_ai.usage.input_tokens`: Input token count (vLLM only)
 - `gen_ai.usage.output_tokens`: Output token count (vLLM only)
 - `operation.outcome`: success/error/timeout (all components)
+- `http.request.method`: HTTP request method (gateway)
+- `http.route`: HTTP request route (gateway)
+- `http.response.status_code`: HTTP response status (gateway)
 - Request duration (automatic via span timing)
-- HTTP method and route attributes (gateway via otelhttp)
 
 **llm-d Specific Attributes**:
-- `llm_d.epp.pd.disaggregation_enabled`: P/D disaggregation status (inference scheduler)
-- `llm_d.epp.pd.prefill_pod_address`: Selected prefill pod address (inference scheduler)
-- `llm_d.kv_cache_manager.hit_ratio`: Cache hit ratio for the request (KV cache manager)
-- `llm_d.kv_cache_manager.pod_count`: Number of pods considered (KV cache manager)
 
-**Enhancement Opportunities**:
-Component owners can extend with additional GenAI semantic convention attributes such as model parameters, latency measurements (TTFT/ITL), routing decisions, and detailed performance metrics as needed for their specific use cases.
+*Inference Scheduler (EPP):*
+- `llm_d.epp.pd.disaggregation_enabled`: P/D disaggregation status
+- `llm_d.epp.pd.prefill_pod_address`: Selected prefill pod address
+
+*KV Cache Manager:*
+- `llm_d.kv_cache_manager.hit_ratio`: Cache hit ratio for the request
+- `llm_d.kv_cache_manager.pod_count`: Number of pods considered
+- `llm_d.kv_cache_manager.tokens_found`: Number of tokens found during tokenization
+- `llm_d.kv_cache_manager.input_tokens`: Input token count for block key generation
+- `llm_d.kv_cache_manager.block_keys_generated`: Number of block keys generated
+- `llm_d.kv_cache_manager.block_keys_count`: Block keys used for lookup/scoring
+- `llm_d.kv_cache_manager.lookup_results`: Number of lookup results from storage
+- `llm_d.kv_cache_manager.scored_pods`: Number of pods that received scores
+
+*Routing Sidecar (P/D Proxy):*
+- `llm_d.proxy.connector`: Proxy connector type (e.g., "nixlv2")
+- `llm_d.prefill.target_host`: Target prefill host for disaggregation
+- `llm_d.nixl.stage`: NIXL protocol stage ("prefill" or "decode")
 
 ## Alternatives
 
