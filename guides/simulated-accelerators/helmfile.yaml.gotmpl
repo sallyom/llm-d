@@ -51,6 +51,10 @@ releases:
           name: {{ .Environment.Values.provider.name }}
         inferencePool:
           apiVersion: {{ .Environment.Values.inferencePool.apiVersion }}
+        inferenceExtension:
+          monitoring:
+            prometheus:
+              enabled: false
     {{- else if or (eq .Environment.Name "istio") (eq .Environment.Name "default") }}
       - provider:
           name: {{ .Environment.Values.provider.name }}

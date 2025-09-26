@@ -1,0 +1,19 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  labels:
+    inferencepool: deepseek-r1-epp
+  name: deepseek-r1-epp-monitor
+spec:
+  endpoints:
+  - authorization:
+      credentials:
+        key: token
+        name: inference-gateway-sa-metrics-reader-secret
+    interval: 10s
+    path: /metrics
+    port: http-metrics
+  jobLabel: deepseek-r1-epp
+  selector:
+    matchLabels:
+      inferencepool: deepseek-r1-epp
