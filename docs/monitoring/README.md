@@ -16,11 +16,14 @@ Please join [SIG-Observability](https://github.com/llm-d/llm-d/blob/dev/SIGS.md#
 
 ### Helmfile Integration
 
-Provided Prometheus custom resources exist in the cluster, all [llm-d guides](../../guides/README.md) include the option to enable Prometheus
-PodMonitor creation for scraping vLLM metrics and ServiceMonitor creation for scraping EPP (Endpoint Picker Protocol) metrics.
-With any llm-d helmfile example, update the values to enable monitoring:
+All [llm-d guides](../../guides/README.md) include the option to enable Prometheus PodMonitor creation for scraping vLLM metrics and ServiceMonitor creation
+for scraping EPP (Endpoint Picker) metrics. With guided examples, monitoring is enabled by default. If running on GKE, monitoring is also enabled by default
+and is set with `provider.name=gke`. When _not_ on GKE, Prometheus custom resources must exist in the cluster. Ensure this matches your environment and if not,
+set `enabled=false` in `[prefill,decode].monitoring.podmonitor` and `prometheus=false` in `inferenceExtension.monitoring` values sections as listed below.
 
 ### vLLM Metrics
+
+vLLM metrics collection is enabled by default with:
 
 ```yaml
 # In your ms-*/values.yaml files
@@ -43,11 +46,9 @@ kubectl get podmonitors -n my-llm-d-namespace
 
 The vLLM metrics from prefill and decode pods will be visible from the Prometheus and/or Grafana user interface.
 
-### EPP (Endpoint Picker Protocol) Metrics
+### EPP (Endpoint Picker) Metrics
 
-EPP provides additional metrics for request routing, scheduling latency, and plugin performance. To enable EPP metrics collection:
-
-**For Gateway API Inference Extension (GAIE) deployments of EPP:**
+EPP provides additional metrics for request routing, scheduling latency, and plugin performance. EPP metrics collection is enabled by default with:
 
 ```yaml
 # In your gaie-*/values.yaml files
@@ -55,6 +56,10 @@ inferenceExtension:
   monitoring:
     prometheus:
       enabled: true
+OR
+
+provider
+  name: gke
 ```
 
 Upon installation, view EPP servicemonitors with:
