@@ -1,0 +1,117 @@
+apiVersion: opentelemetry.io/v1alpha1
+kind: Instrumentation
+metadata:
+  name: vllm-instrumentation
+  namespace: llmd
+  labels:
+    app: vllm
+    component: tracing
+spec:
+  # Exporter configuration - adjust endpoint for your trace collector
+  exporter:
+    endpoint: http://jaeger-collector.observability.svc.cluster.local:4317
+    # Alternative for Jaeger all-in-one: http://jaeger.observability.svc.cluster.local:4317
+    # Alternative for OTLP HTTP: http://jaeger-collector.observability.svc.cluster.local:4318/v1/traces
+
+  # Propagators for distributed tracing context
+  propagators:
+    - tracecontext
+    - baggage
+
+  # Sampling configuration for production environments
+  sampler:
+    type: parentbased_traceidratio
+    argument: "1.0"  # 100% sampling - adjust for production (e.g., "0.1" for 10%)
+
+  # Python-specific configuration
+  python:
+    # Use the latest auto-instrumentation image
+    image: ghcr.io/open-telemetry/opentelemetry-operator/autoinstrumentation-python:latest
+
+    # Environment variables for OpenTelemetry Python instrumentation
+    env:
+      # === Core OTEL Configuration ===
+      - name: OTEL_SERVICE_NAME
+        value: "vllm-server"
+      - name: OTEL_SERVICE_VERSION
+        value: "v1.0.0"  # Update with your vLLM version
+      - name: OTEL_SERVICE_NAMESPACE
+        value: "llmd"
+
+      # === Exporter Configuration ===
+      - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+        value: "http://jaeger-collector.observability.svc.cluster.local:4317"
+      - name: OTEL_EXPORTER_OTLP_TRACES_PROTOCOL
+        value: "grpc"  # Options: grpc, http/protobuf
+      - name: OTEL_EXPORTER_OTLP_TRACES_INSECURE
+        value: "true"  # Set to false if using TLS
+
+      # === Resource Attributes ===
+      - name: OTEL_RESOURCE_ATTRIBUTES
+        value: "service.name=vllm-server,service.version=v1.0.0,deployment.environment=development,k8s.cluster.name=llm-cluster"
+
+      # === Instrumentation Configuration ===
+      # Enable specific instrumentations for vLLM's dependencies
+      - name: OTEL_PYTHON_DISABLED_INSTRUMENTATIONS
+        value: ""  # Enable all by default
+
+      # Specific instrumentations that vLLM benefits from:
+      # - fastapi: Web framework spans
+      # - requests: HTTP client spans
+      # - aiohttp-client: Async HTTP client spans
+      # - openai-api: OpenAI client spans (if any external calls)
+      # - prometheus: Metrics correlation (if needed)
+
+      # === Performance Tuning ===
+      - name: OTEL_BSP_MAX_QUEUE_SIZE
+        value: "2048"  # Batch span processor queue size
+      - name: OTEL_BSP_MAX_EXPORT_BATCH_SIZE
+        value: "512"   # Batch size for span export
+      - name: OTEL_BSP_EXPORT_TIMEOUT
+        value: "30000" # Export timeout in milliseconds
+      - name: OTEL_BSP_SCHEDULE_DELAY
+        value: "5000"  # Delay between batch exports in milliseconds
+
+      # === FastAPI Specific ===
+      # Capture request/response bodies (be careful with PII)
+      - name: OTEL_INSTRUMENTATION_HTTP_CAPTURE_HEADERS_SERVER_REQUEST
+        value: "content-type,user-agent,x-request-id,traceparent,tracestate"
+      - name: OTEL_INSTRUMENTATION_HTTP_CAPTURE_HEADERS_SERVER_RESPONSE
+        value: "content-type,x-request-id"
+
+      # === Async Configuration ===
+      - name: OTEL_PYTHON_LOG_CORRELATION
+        value: "true"
+      - name: OTEL_PYTHON_LOG_LEVEL
+        value: "info"  # Options: debug, info, warning, error
+
+      # === vLLM Integration Variables ===
+      # These allow vLLM's custom tracing to work alongside auto-instrumentation
+      - name: VLLM_USE_V1
+        value: "1"  # Enable vLLM v1 engine with tracing support
+
+      # Optional: Detailed tracing for more granular spans
+      - name: VLLM_COLLECT_DETAILED_TRACES
+        value: "all"  # Options: model, worker, all
+
+  # Resource configuration
+  resource:
+    addK8sUIDAttributes: true  # Add Kubernetes metadata to spans
+
+# vLLM Deployment
+# spec.template.metadata.annotations must include the following to match vllm-instrumentation
+#      annotations:
+#       instrumentation.opentelemetry.io/inject-python: "vllm-instrumentation"
+# Optional: specific container if multiple containers in pod
+#       instrumentation.opentelemetry.io/container-names: "vllm"
+# and in the spec.containers[] args:
+#        args:
+          # Keep vLLM's custom tracing for LLM-specific spans
+#          - "--otlp-traces-endpoint=http://jaeger-collector.observability.svc.cluster.local:4317"
+#          # Optional: Enable detailed custom tracing
+#          - "--collect-detailed-traces=all"
+#        env:
+        # These environment variables will be automatically injected by the operator
+        # but you can override them here if needed
+#        - name: OTEL_SERVICE_NAME
+#          value: "vllm-server"

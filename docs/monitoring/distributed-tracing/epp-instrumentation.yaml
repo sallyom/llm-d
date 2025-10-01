@@ -1,0 +1,264 @@
+apiVersion: opentelemetry.io/v1alpha1
+kind: Instrumentation
+metadata:
+  name: epp-instrumentation
+  namespace: default
+  labels:
+    app: llm-d-epp
+    component: tracing
+spec:
+  # Exporter configuration - adjust endpoint for your trace collector
+  exporter:
+    endpoint: http://jaeger-collector.observability.svc.cluster.local:4317
+    # Alternative for Jaeger all-in-one: http://jaeger.observability.svc.cluster.local:4317
+    # Alternative for OTLP HTTP: http://jaeger-collector.observability.svc.cluster.local:4318/v1/traces
+
+  # Propagators for distributed tracing context
+  propagators:
+    - tracecontext
+    - baggage
+    - b3multi  # For compatibility with other B3 instrumented services
+
+  # Sampling configuration for production environments
+  sampler:
+    type: parentbased_traceidratio
+    argument: "1.0"  # 100% sampling - adjust for production (e.g., "0.1" for 10%)
+
+  # Go-specific configuration for EPP (Endpoint Picker)
+  go:
+    # Use the latest auto-instrumentation image for Go
+    image: ghcr.io/open-telemetry/opentelemetry-operator/autoinstrumentation-go:latest
+
+    # Environment variables for OpenTelemetry Go instrumentation
+    env:
+      # === Core OTEL Configuration ===
+      - name: OTEL_SERVICE_NAME
+        value: "llm-d-epp"
+      - name: OTEL_SERVICE_VERSION
+        value: "v1.0.0"  # Update with your EPP version
+      - name: OTEL_SERVICE_NAMESPACE
+        value: "llm-inference"
+
+      # === Exporter Configuration ===
+      - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+        value: "http://jaeger-collector.observability.svc.cluster.local:4317"
+      - name: OTEL_EXPORTER_OTLP_TRACES_PROTOCOL
+        value: "grpc"  # Options: grpc, http/protobuf
+      - name: OTEL_EXPORTER_OTLP_TRACES_INSECURE
+        value: "true"  # Set to false if using TLS
+
+      # === Resource Attributes ===
+      - name: OTEL_RESOURCE_ATTRIBUTES
+        value: "service.name=llm-d-epp,service.version=v1.0.0,deployment.environment=development,k8s.cluster.name=llm-cluster,component=endpoint-picker"
+
+      # === Go Instrumentation Specific ===
+      # Enable specific Go instrumentations that EPP benefits from:
+      # - net/http: HTTP server/client spans
+      # - google.golang.org/grpc: gRPC server/client spans (important for EPP)
+      # - database/sql: Database spans (if any)
+      - name: OTEL_GO_AUTO_TARGET_EXE
+        value: "/app/epp"  # Target the EPP binary specifically
+
+      # === Performance Tuning ===
+      - name: OTEL_BSP_MAX_QUEUE_SIZE
+        value: "2048"  # Batch span processor queue size
+      - name: OTEL_BSP_MAX_EXPORT_BATCH_SIZE
+        value: "512"   # Batch size for span export
+      - name: OTEL_BSP_EXPORT_TIMEOUT
+        value: "30000" # Export timeout in milliseconds
+      - name: OTEL_BSP_SCHEDULE_DELAY
+        value: "5000"  # Delay between batch exports in milliseconds
+
+      # === gRPC Specific Configuration ===
+      # EPP uses gRPC extensively (port 9002, 9003)
+      - name: OTEL_INSTRUMENTATION_GRPC_CAPTURE_METADATA
+        value: "true"
+
+      # === HTTP Specific Configuration ===
+      # For metrics endpoint (port 9090) and any HTTP clients
+      - name: OTEL_INSTRUMENTATION_HTTP_CAPTURE_HEADERS_SERVER_REQUEST
+        value: "content-type,user-agent,x-request-id,traceparent,tracestate"
+      - name: OTEL_INSTRUMENTATION_HTTP_CAPTURE_HEADERS_SERVER_RESPONSE
+        value: "content-type,x-request-id"
+
+      # === Logging Integration ===
+      - name: OTEL_GO_LOG_CORRELATION
+        value: "true"
+      - name: OTEL_LOG_LEVEL
+        value: "info"  # Options: debug, info, warning, error
+
+      # === EPP-Specific Configuration ===
+      # These help preserve EPP's existing custom tracing alongside auto-instrumentation
+      - name: OTEL_GO_AUTO_INCLUDE_DB_STATEMENT
+        value: "true"  # Include SQL statements in spans (if database used)
+
+      # === ZMQ Configuration ===
+      # EPP uses ZeroMQ (port 5557) - while not auto-instrumented,
+      # this ensures context propagation works
+      - name: OTEL_PROPAGATORS
+        value: "tracecontext,baggage,b3multi"
+
+  # Resource configuration
+  resource:
+    addK8sUIDAttributes: true  # Add Kubernetes metadata to spans
+
+---
+# Optional: ServiceMonitor for Prometheus metrics correlation
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: epp-metrics
+  namespace: default
+  labels:
+    app: llm-d-epp
+spec:
+  selector:
+    matchLabels:
+      app: llm-d-epp
+  endpoints:
+  - port: metrics
+    path: /metrics
+    interval: 30s
+    scrapeTimeout: 10s
+
+---
+# Example EPP Deployment with instrumentation annotation
+# This is based on the existing deployment structure in llm-d-inference-scheduler
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llm-d-epp
+  namespace: default
+  labels:
+    app: llm-d-epp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: llm-d-epp
+  template:
+    metadata:
+      labels:
+        app: llm-d-epp
+      annotations:
+        # This annotation enables Go auto-instrumentation
+        instrumentation.opentelemetry.io/inject-go: "epp-instrumentation"
+        # Optional: specific container if multiple containers in pod
+        # instrumentation.opentelemetry.io/container-names: "epp"
+    spec:
+      serviceAccountName: llm-d-epp
+      terminationGracePeriodSeconds: 130
+      containers:
+      - name: epp
+        image: ghcr.io/llm-d/llm-d-inference-scheduler:latest
+        imagePullPolicy: IfNotPresent
+        args:
+        - --pool-name
+        - "inference-pool"  # Adjust for your pool
+        - "--pool-group"
+        - "inference.networking.x-k8s.io"
+        - --v
+        - "4"
+        - --zap-encoder
+        - "json"
+        - --grpc-port
+        - "9002"
+        - --grpc-health-port
+        - "9003"
+        env:
+        - name: PYTHONHASHSEED
+          value: "42"
+        # These environment variables will be automatically injected by the operator
+        # but you can override them here if needed
+        - name: OTEL_SERVICE_NAME
+          value: "llm-d-epp"
+        - name: OTEL_RESOURCE_ATTRIBUTES
+          value: "service.name=llm-d-epp,component=endpoint-picker,k8s.pod.name=$(POD_NAME),k8s.namespace.name=$(POD_NAMESPACE)"
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        ports:
+        - containerPort: 5557  # ZMQ SUB socket for KV-Events
+          name: zmq
+        - containerPort: 9002  # gRPC port
+          name: grpc
+        - containerPort: 9003  # gRPC health port
+          name: grpc-health
+        - name: metrics
+          containerPort: 9090  # Metrics port
+        livenessProbe:
+          grpc:
+            port: 9003
+            service: envoy.service.ext_proc.v3.ExternalProcessor
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        readinessProbe:
+          grpc:
+            port: 9003
+            service: envoy.service.ext_proc.v3.ExternalProcessor
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        volumeMounts:
+        - name: epp-config
+          mountPath: /etc/epp
+        - name: cache
+          mountPath: /cache
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+      volumes:
+      - name: epp-config
+        configMap:
+          name: epp-config
+      - name: cache
+        emptyDir: {}
+
+---
+# Service for EPP
+apiVersion: v1
+kind: Service
+metadata:
+  name: llm-d-epp-service
+  namespace: default
+  labels:
+    app: llm-d-epp
+spec:
+  selector:
+    app: llm-d-epp
+  ports:
+  - name: grpc
+    port: 9002
+    targetPort: 9002
+    protocol: TCP
+  - name: grpc-health
+    port: 9003
+    targetPort: 9003
+    protocol: TCP
+  - name: metrics
+    port: 9090
+    targetPort: 9090
+    protocol: TCP
+  - name: zmq
+    port: 5557
+    targetPort: 5557
+    protocol: TCP
+  type: ClusterIP
+
+---
+# ServiceAccount for EPP (if RBAC is needed)
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: llm-d-epp
+  namespace: default
+  labels:
+    app: llm-d-epp
