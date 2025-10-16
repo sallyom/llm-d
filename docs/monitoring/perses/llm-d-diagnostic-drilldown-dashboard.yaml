@@ -1,0 +1,576 @@
+kind: Dashboard
+metadata:
+  name: llm-d-diagnostic-drilldown
+  project: default
+spec:
+  display:
+    name: "llm-d Diagnostic Drill-Down"
+    description: "Detailed diagnostic metrics for troubleshooting llm-d inference server (Tier 2 metrics)"
+  duration: 6h
+  refreshInterval: 30s
+  datasources:
+    prometheus:
+      default: true
+      plugin:
+        kind: PrometheusDatasource
+        spec:
+          directUrl: http://prometheus:9090
+  variables:
+    - kind: TextVariable
+      spec:
+        name: namespace
+        display:
+          name: "Namespace"
+          description: "Kubernetes namespace filter"
+        allowAllValue: true
+        allowMultiple: true
+        plugin:
+          kind: PrometheusLabelValuesVariable
+          spec:
+            datasource:
+              kind: PrometheusDatasource
+              name: prometheus
+            labelName: namespace
+            matchers: []
+    - kind: TextVariable
+      spec:
+        name: model_name
+        display:
+          name: "Model Name"
+          description: "Model name filter"
+        allowAllValue: true
+        allowMultiple: true
+        plugin:
+          kind: PrometheusLabelValuesVariable
+          spec:
+            datasource:
+              kind: PrometheusDatasource
+              name: prometheus
+            labelName: model_name
+            matchers:
+              - vllm:generation_tokens_total
+  layouts:
+    - kind: Grid
+      spec:
+        display:
+          title: "Model Serving"
+          collapse:
+            open: true
+        items:
+          - x: 0
+            y: 0
+            width: 12
+            height: 8
+            content:
+              $ref: "#/spec/panels/kv_cache_utilization"
+          - x: 12
+            y: 0
+            width: 12
+            height: 8
+            content:
+              $ref: "#/spec/panels/request_queue_lengths"
+          - x: 0
+            y: 8
+            width: 12
+            height: 8
+            content:
+              $ref: "#/spec/panels/model_throughput"
+          - x: 12
+            y: 8
+            width: 12
+            height: 8
+            content:
+              $ref: "#/spec/panels/generation_token_rate"
+          - x: 0
+            y: 16
+            width: 12
+            height: 8
+            content:
+              $ref: "#/spec/panels/queue_utilization"
+    - kind: Grid
+      spec:
+        display:
+          title: "Routing"
+          collapse:
+            open: true
+        items:
+          - x: 0
+            y: 0
+            width: 12
+            height: 8
+            content:
+              $ref: "#/spec/panels/request_distribution"
+          - x: 12
+            y: 0
+            width: 12
+            height: 8
+            content:
+              $ref: "#/spec/panels/token_distribution"
+          - x: 0
+            y: 8
+            width: 12
+            height: 8
+            content:
+              $ref: "#/spec/panels/idle_gpu_time"
+          - x: 12
+            y: 8
+            width: 12
+            height: 8
+            content:
+              $ref: "#/spec/panels/routing_decision_latency"
+    - kind: Grid
+      spec:
+        display:
+          title: "Prefix Caching"
+          collapse:
+            open: true
+        items:
+          - x: 0
+            y: 0
+            width: 8
+            height: 8
+            content:
+              $ref: "#/spec/panels/prefix_cache_hit_rate"
+          - x: 8
+            y: 0
+            width: 16
+            height: 8
+            content:
+              $ref: "#/spec/panels/per_instance_hit_rate"
+          - x: 0
+            y: 8
+            width: 12
+            height: 8
+            content:
+              $ref: "#/spec/panels/cache_utilization"
+    - kind: Grid
+      spec:
+        display:
+          title: "P/D Disaggregation"
+          collapse:
+            open: true
+        items:
+          - x: 0
+            y: 0
+            width: 12
+            height: 8
+            content:
+              $ref: "#/spec/panels/prefill_worker_utilization"
+          - x: 12
+            y: 0
+            width: 12
+            height: 8
+            content:
+              $ref: "#/spec/panels/decode_worker_utilization"
+          - x: 0
+            y: 8
+            width: 12
+            height: 8
+            content:
+              $ref: "#/spec/panels/prefill_queue_length"
+  panels:
+    kv_cache_utilization:
+      kind: Panel
+      spec:
+        display:
+          name: "KV Cache Utilization"
+          description: "KV cache utilization percentage by pod and model"
+        plugin:
+          kind: TimeSeriesChart
+          spec:
+            legend:
+              position: bottom
+            yAxis:
+              show: true
+              label: "utilization"
+              format:
+                unit: percent
+              min: 0
+              max: 100
+        queries:
+          - kind: TimeSeriesQuery
+            spec:
+              plugin:
+                kind: PrometheusTimeSeriesQuery
+                spec:
+                  datasource:
+                    kind: PrometheusDatasource
+                    name: prometheus
+                  query: 'avg by(pod, model_name) (vllm:kv_cache_usage_perc{namespace=~"$namespace",model_name=~"$model_name"})'
+                  seriesNameFormat: "{{pod}}-{{model_name}}"
+    request_queue_lengths:
+      kind: Panel
+      spec:
+        display:
+          name: "Request Queue Lengths"
+          description: "Number of requests waiting in queue by pod and model"
+        plugin:
+          kind: TimeSeriesChart
+          spec:
+            legend:
+              position: bottom
+            yAxis:
+              show: true
+              label: "requests"
+        queries:
+          - kind: TimeSeriesQuery
+            spec:
+              plugin:
+                kind: PrometheusTimeSeriesQuery
+                spec:
+                  datasource:
+                    kind: PrometheusDatasource
+                    name: prometheus
+                  query: 'sum by(pod, model_name) (vllm:num_requests_waiting{namespace=~"$namespace",model_name=~"$model_name"})'
+                  seriesNameFormat: "{{pod}}-{{model_name}}"
+    model_throughput:
+      kind: Panel
+      spec:
+        display:
+          name: "Model Throughput"
+          description: "Total token throughput (prompt + generation tokens) per second by model and pod"
+        plugin:
+          kind: TimeSeriesChart
+          spec:
+            legend:
+              position: bottom
+            yAxis:
+              show: true
+              label: "tokens/sec"
+        queries:
+          - kind: TimeSeriesQuery
+            spec:
+              plugin:
+                kind: PrometheusTimeSeriesQuery
+                spec:
+                  datasource:
+                    kind: PrometheusDatasource
+                    name: prometheus
+                  query: 'sum by(model_name, pod) (rate(vllm:prompt_tokens_total{namespace=~"$namespace",model_name=~"$model_name"}[5m]) + rate(vllm:generation_tokens_total{namespace=~"$namespace",model_name=~"$model_name"}[5m]))'
+                  seriesNameFormat: "{{model_name}}-{{pod}}"
+    generation_token_rate:
+      kind: Panel
+      spec:
+        display:
+          name: "Generation Token Rate"
+          description: "Generation token rate per second by model and pod"
+        plugin:
+          kind: TimeSeriesChart
+          spec:
+            legend:
+              position: bottom
+            yAxis:
+              show: true
+              label: "tokens/sec"
+        queries:
+          - kind: TimeSeriesQuery
+            spec:
+              plugin:
+                kind: PrometheusTimeSeriesQuery
+                spec:
+                  datasource:
+                    kind: PrometheusDatasource
+                    name: prometheus
+                  query: 'sum by(model_name, pod) (rate(vllm:generation_tokens_total{namespace=~"$namespace",model_name=~"$model_name"}[5m]))'
+                  seriesNameFormat: "{{model_name}}-{{pod}}"
+    queue_utilization:
+      kind: Panel
+      spec:
+        display:
+          name: "Queue Utilization"
+          description: "Average number of running requests per pod (queue utilization)"
+        plugin:
+          kind: TimeSeriesChart
+          spec:
+            legend:
+              position: bottom
+            yAxis:
+              show: true
+              label: "requests"
+        queries:
+          - kind: TimeSeriesQuery
+            spec:
+              plugin:
+                kind: PrometheusTimeSeriesQuery
+                spec:
+                  datasource:
+                    kind: PrometheusDatasource
+                    name: prometheus
+                  query: 'avg by(pod) (vllm:num_requests_running{namespace=~"$namespace",model_name=~"$model_name"})'
+                  seriesNameFormat: "{{pod}}"
+    request_distribution:
+      kind: Panel
+      spec:
+        display:
+          name: "Request Distribution"
+          description: "Request distribution (QPS) per vLLM instance"
+        plugin:
+          kind: TimeSeriesChart
+          spec:
+            legend:
+              position: bottom
+            yAxis:
+              show: true
+              label: "requests/sec"
+        queries:
+          - kind: TimeSeriesQuery
+            spec:
+              plugin:
+                kind: PrometheusTimeSeriesQuery
+                spec:
+                  datasource:
+                    kind: PrometheusDatasource
+                    name: prometheus
+                  query: 'sum by(pod) (rate(inference_model_request_total{target_model!="",namespace=~"$namespace",model_name=~"$model_name"}[5m]))'
+                  seriesNameFormat: "{{pod}}"
+    token_distribution:
+      kind: Panel
+      spec:
+        display:
+          name: "Token Distribution"
+          description: "Token distribution (tokens/sec) per vLLM instance"
+        plugin:
+          kind: TimeSeriesChart
+          spec:
+            legend:
+              position: bottom
+            yAxis:
+              show: true
+              label: "tokens/sec"
+        queries:
+          - kind: TimeSeriesQuery
+            spec:
+              plugin:
+                kind: PrometheusTimeSeriesQuery
+                spec:
+                  datasource:
+                    kind: PrometheusDatasource
+                    name: prometheus
+                  query: 'sum by(pod) (rate(vllm:prompt_tokens_total{namespace=~"$namespace",model_name=~"$model_name"}[5m]) + rate(vllm:generation_tokens_total{namespace=~"$namespace",model_name=~"$model_name"}[5m]))'
+                  seriesNameFormat: "{{pod}}"
+    idle_gpu_time:
+      kind: Panel
+      spec:
+        display:
+          name: "Idle GPU Time"
+          description: "Percentage of time GPUs are idle (not processing tokens)"
+        plugin:
+          kind: TimeSeriesChart
+          spec:
+            legend:
+              position: bottom
+            yAxis:
+              show: true
+              label: "utilization"
+              format:
+                unit: percentunit
+              min: 0
+              max: 1
+        queries:
+          - kind: TimeSeriesQuery
+            spec:
+              plugin:
+                kind: PrometheusTimeSeriesQuery
+                spec:
+                  datasource:
+                    kind: PrometheusDatasource
+                    name: prometheus
+                  query: '1 - avg by(pod) (rate(vllm:iteration_tokens_total{namespace=~"$namespace",model_name=~"$model_name"}[5m]) > 0)'
+                  seriesNameFormat: "{{pod}}"
+    routing_decision_latency:
+      kind: Panel
+      spec:
+        display:
+          name: "Routing Decision Latency"
+          description: "P99 latency for routing decision by scheduler plugin"
+        plugin:
+          kind: TimeSeriesChart
+          spec:
+            legend:
+              position: bottom
+            yAxis:
+              show: true
+              label: "seconds"
+              format:
+                unit: s
+        queries:
+          - kind: TimeSeriesQuery
+            spec:
+              plugin:
+                kind: PrometheusTimeSeriesQuery
+                spec:
+                  datasource:
+                    kind: PrometheusDatasource
+                    name: prometheus
+                  query: 'histogram_quantile(0.99, sum by(le) (rate(inference_extension_scheduler_plugin_duration_seconds_bucket{namespace=~"$namespace"}[5m])))'
+                  seriesNameFormat: "P99"
+    prefix_cache_hit_rate:
+      kind: Panel
+      spec:
+        display:
+          name: "Prefix Cache Hit Rate"
+          description: "Overall prefix cache hit rate across all instances"
+        plugin:
+          kind: StatChart
+          spec:
+            calculation: lastNumber
+            format:
+              unit: percentunit
+              decimalPlaces: 2
+            thresholds:
+              mode: absolute
+              steps:
+                - value: 0
+                  color: red
+                - value: 0.5
+                  color: yellow
+                - value: 0.8
+                  color: green
+        queries:
+          - kind: TimeSeriesQuery
+            spec:
+              plugin:
+                kind: PrometheusTimeSeriesQuery
+                spec:
+                  datasource:
+                    kind: PrometheusDatasource
+                    name: prometheus
+                  query: 'sum(rate(vllm:prefix_cache_hits_total{namespace=~"$namespace",model_name=~"$model_name"}[5m])) / sum(rate(vllm:prefix_cache_queries_total{namespace=~"$namespace",model_name=~"$model_name"}[5m]))'
+                  seriesNameFormat: "Hit Rate"
+    per_instance_hit_rate:
+      kind: Panel
+      spec:
+        display:
+          name: "Per-Instance Hit Rate"
+          description: "Prefix cache hit rate by individual vLLM instance"
+        plugin:
+          kind: TimeSeriesChart
+          spec:
+            legend:
+              position: bottom
+            yAxis:
+              show: true
+              label: "hit rate"
+              format:
+                unit: percentunit
+              min: 0
+              max: 1
+        queries:
+          - kind: TimeSeriesQuery
+            spec:
+              plugin:
+                kind: PrometheusTimeSeriesQuery
+                spec:
+                  datasource:
+                    kind: PrometheusDatasource
+                    name: prometheus
+                  query: 'sum by(pod) (rate(vllm:prefix_cache_hits_total{namespace=~"$namespace",model_name=~"$model_name"}[5m])) / sum by(pod) (rate(vllm:prefix_cache_queries_total{namespace=~"$namespace",model_name=~"$model_name"}[5m]))'
+                  seriesNameFormat: "{{pod}}"
+    cache_utilization:
+      kind: Panel
+      spec:
+        display:
+          name: "Cache Utilization"
+          description: "Cache utilization percentage by pod and model"
+        plugin:
+          kind: TimeSeriesChart
+          spec:
+            legend:
+              position: bottom
+            yAxis:
+              show: true
+              label: "utilization"
+              format:
+                unit: percent
+              min: 0
+              max: 100
+        queries:
+          - kind: TimeSeriesQuery
+            spec:
+              plugin:
+                kind: PrometheusTimeSeriesQuery
+                spec:
+                  datasource:
+                    kind: PrometheusDatasource
+                    name: prometheus
+                  query: 'avg by(pod, model_name) (vllm:kv_cache_usage_perc{namespace=~"$namespace",model_name=~"$model_name"} * 100)'
+                  seriesNameFormat: "{{pod}}-{{model_name}}"
+    prefill_worker_utilization:
+      kind: Panel
+      spec:
+        display:
+          name: "Prefill Worker Utilization"
+          description: "Average number of running requests on prefill workers"
+        plugin:
+          kind: TimeSeriesChart
+          spec:
+            legend:
+              position: bottom
+            yAxis:
+              show: true
+              label: "requests"
+        queries:
+          - kind: TimeSeriesQuery
+            spec:
+              plugin:
+                kind: PrometheusTimeSeriesQuery
+                spec:
+                  datasource:
+                    kind: PrometheusDatasource
+                    name: prometheus
+                  query: 'avg by(pod) (vllm:num_requests_running{pod=~".*prefill.*",namespace=~"$namespace",model_name=~"$model_name"})'
+                  seriesNameFormat: "{{pod}}"
+    decode_worker_utilization:
+      kind: Panel
+      spec:
+        display:
+          name: "Decode Worker Utilization"
+          description: "KV cache usage percentage on decode workers"
+        plugin:
+          kind: TimeSeriesChart
+          spec:
+            legend:
+              position: bottom
+            yAxis:
+              show: true
+              label: "utilization"
+              format:
+                unit: percent
+              min: 0
+              max: 100
+        queries:
+          - kind: TimeSeriesQuery
+            spec:
+              plugin:
+                kind: PrometheusTimeSeriesQuery
+                spec:
+                  datasource:
+                    kind: PrometheusDatasource
+                    name: prometheus
+                  query: 'avg by(pod) (vllm:kv_cache_usage_perc{pod=~".*decode.*",namespace=~"$namespace",model_name=~"$model_name"})'
+                  seriesNameFormat: "{{pod}}"
+    prefill_queue_length:
+      kind: Panel
+      spec:
+        display:
+          name: "Prefill Queue Length"
+          description: "Number of requests waiting in prefill worker queues"
+        plugin:
+          kind: TimeSeriesChart
+          spec:
+            legend:
+              position: bottom
+            yAxis:
+              show: true
+              label: "requests"
+        queries:
+          - kind: TimeSeriesQuery
+            spec:
+              plugin:
+                kind: PrometheusTimeSeriesQuery
+                spec:
+                  datasource:
+                    kind: PrometheusDatasource
+                    name: prometheus
+                  query: 'sum by(pod) (vllm:num_requests_waiting{pod=~".*prefill.*",namespace=~"$namespace",model_name=~"$model_name"})'
+                  seriesNameFormat: "{{pod}}"
