@@ -98,7 +98,17 @@ For specific PromQL queries to monitor LLM-D deployments, see:
 
 ## Load Testing and Error Generation
 
-To populate metrics (especially error metrics) for testing and monitoring validation:
+To populate metrics (including error metrics) for testing and monitoring validation:
 
 - [Load Generation Script](./scripts/generate-load-llmd.sh) - Sends both valid and malformed requests to generate metrics
 
+### Running as a Kubernetes Job
+
+For in-cluster load generation with telemetry:
+
+```bash
+# Edit scripts/job.yaml to set your ENDPOINT, MODEL_NAME, and DURATION_MINUTES
+kubectl apply -f scripts/job.yaml -n <your-namespace>
+
+```
+The job runs for 5 minutes by default (override with `args: ["<duration_minutes>"]` in job.yaml).

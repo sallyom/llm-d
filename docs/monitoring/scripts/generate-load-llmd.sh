@@ -5,9 +5,9 @@
 
 set -e
 
-ENDPOINT="http://localhost:8000/v1"
+ENDPOINT="${ENDPOINT:-http://localhost:8000/v1}"
 DURATION_MINUTES=${1:-5}
-MODEL_NAME="Qwen/Qwen3-0.6B"
+MODEL_NAME="${MODEL_NAME:-Qwen/Qwen3-0.6B}"
 
 echo "Load Generator with Error Generation"
 echo "==================================="

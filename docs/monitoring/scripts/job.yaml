@@ -1,0 +1,34 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: llm-d-load-generator
+  labels:
+    app: llm-d-load-generator
+spec:
+  template:
+    metadata:
+      labels:
+        app: llm-d-load-generator
+    spec:
+      containers:
+      - name: load-generator
+        image: quay.io/sallyom/llm-d-generate-load:latest
+        imagePullPolicy: Always
+        env:
+        # Edit these values for your deployment
+        - name: ENDPOINT
+          #value: "http://your-gateway.your-namespace.svc.cluster.local/v1"
+          value: http://deepseek-r1-0528-kserve-workload-svc.llm-test.svc.cluster.local:8000/v1
+        - name: MODEL_NAME
+          #value: "your-model-name"
+          value: deepseek-ai/DeepSeek-R1-0528
+        - name: DURATION_MINUTES
+          value: "5"
+        resources:
+          limits:
+            cpu: 500m
+            memory: 256Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+      restartPolicy: Never
