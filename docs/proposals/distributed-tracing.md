@@ -2,9 +2,9 @@
 
 ## Summary
 
-This proposal introduces distributed tracing for llm-d distributed inference framework. Distributed tracing will provide observability into inference
-workloads, enabling performance optimization, cost control, and quality validation across the llm-d stack. The solution will be built on OpenTelemetry
-and integrated as a unified opt-in feature. 
+This proposal introduces distributed tracing for llm-d distributed inference framework using manual OpenTelemetry instrumentation.
+Distributed tracing will provide observability into inference workloads, enabling performance optimization, cost control, and quality
+validation across the llm-d stack through explicit, custom spans at critical decision points. 
 
 ## Motivation
 
@@ -34,28 +34,21 @@ routing and disaggregated serving.
 
 ### Non-Goals
 
-* **Fine-grained Internal Instrumentation**: This proposal focuses on end-to-end visibility through ingress/egress tracing, paving the way for individual
-component owners to add more fine-grained spans to cover other internal operations, function calls, and database queries within components.
-
-* **Metrics Collection**: This proposal focuses on distributed tracing, not metrics collection, though OpenTelemetry collectors can export to both.
-Note that opentelemetry instrumentation can emit metrics data from instrumented processes, for example, with HTTP servers. Tracing gives users
-important RED metrics without direct metrics instrumentation.
+* **Metrics Collection**: This proposal focuses on distributed tracing. While OpenTelemetry can emit metrics, that is out of scope.
 
 * **Log Aggregation**: While OpenTelemetry supports logs, this proposal addresses distributed tracing only.
 
-* **Real-time Alerting**: Tracing data analysis and alerting are out of scope, although the metrics emitted from trace data can feed into alerting systems.
+* **Real-time Alerting**: Tracing data analysis and alerting are out of scope.
 
-* **SLO and SLA Guarantees**: Initial implementation focuses on observability rather than SLA enforcement, though tracing data
-supports SLO and SLA validation.
+* **SLO/SLA Guarantees**: Initial implementation focuses on observability rather than SLA enforcement.
 
-* **Sensitive Data Exposure**: This proposal does not include request/response payload tracing to prevent inadvertent logging of sensitive LLM inputs/outputs.
-Token counts and metadata are captured without exposing actual content.
+* **Sensitive Data Exposure**: This proposal does not include request/response payload tracing. Only token counts and metadata are captured.
 
 ## Proposal
 
-This proposal introduces distributed tracing as a unified opt-in capability across the llm-d stack,
-implemented through OpenTelemetry and configured via the llm-d-infra guided examples. The solution focuses on instrumenting
-the critical path of LLM inference requests to provide end-to-end observability from inference gateway to model response.
+This proposal introduces distributed tracing across the llm-d stack using **manual OpenTelemetry instrumentation**.
+Each component will explicitly initialize tracers and create custom spans around critical operations—scheduling decisions,
+cache lookups, model execution—to provide deep, end-to-end observability with precise control over traced operations and attributes.
 
 ### User Stories
 
@@ -98,344 +91,261 @@ vendor-agnostic standard for collecting and generating telemetry data. OpenTelem
 
 ### Component Instrumentation Strategy
 
-The instrumentation strategy focuses on the critical path of LLM inference requests through llm-d,
-covering key components responsible for routing, caching, and serving.
+**Manual Instrumentation Approach:**
 
-**Implementation Approach:**
-Initial implementation will focus on ingress/egress instrumentation to establish end-to-end visibility with minimal complexity.
-Implementation prioritizes request entry and exit points from each component rather than internal operation tracing.
+Components will use the OpenTelemetry SDK to explicitly create custom spans at strategic points:
 
-**Auto-instrumentation Implementation:**
-llm-d will implement distributed tracing using an auto-instrumentation approach with external agents:
-- **llm-d-inference-scheduler (EPP)**: Auto-instrumentation support with P/D disaggregation pre-request plugin instrumentation
-- **llm-d-kv-cache-manager**: Auto-instrumentation with utility functions for cache scoring and lookup operations
-- **P/D Proxy (llm-d-routing-sidecar)**: Auto-instrumentation support with minimal tracing package
-- **vLLM v1**: Full tracing support with native instrumentation using `init_tracer()`
+- **Request lifecycle spans**: Entry and exit points for end-to-end visibility
+- **Decision point spans**: Scheduling, routing, admission control logic
+- **Expensive operation spans**: Cache lookups, model execution, KV transfers
+- **Error path spans**: Failures and exception handling
 
-**Auto-instrumentation Benefits:**
-- **Zero Configuration**: Components use global tracers via `otel.Tracer()`, eliminating need for environment variables or explicit setup
-- **Agent Compatibility**: Auto-instrumentation agents provide TraceProvider configuration without requiring application code changes
-- **Minimal Implementation**: Adds tracing capability with minimal code footprint and dependencies
-- **Operational Consistency**: All components will follow the same auto-instrumentation pattern
+**Manual Instrumentation Benefits:**
+
+- **Precise Control**: Decide exactly what to trace and when
+- **Rich Attributes**: Custom attributes expose component-specific decision details
+- **Security by Design**: Explicit control prevents accidental sensitive data exposure
+- **Debugging Power**: Detailed spans at key operations enable rapid root cause analysis
+- **Performance Aware**: Add instrumentation only where overhead is acceptable
 
 ### Sampling Strategy
 
-As a subsystem of LLM backend services, llm-d typically receives requests from upstream services that may already be instrumented with distributed tracing.
-These incoming requests carry parent span information and sampling decisions that must be properly handled.
+**Parent-Based Sampling (Recommended):**
 
-**Sampling Approach Options:**
+- Respect upstream sampling decisions when llm-d is called by traced services
+- Allow independent sampling for llm-d-initiated operations
+- Default sampling rate: **10%** (configurable via `OTEL_TRACES_SAMPLER_ARG`)
 
-1. **Parent-Based Sampling (Recommended)**: Respect upstream sampling decisions while allowing independent sampling for llm-d-initiated operations
-   - **Pros**: Maintains trace continuity with upstream services, respects existing sampling budgets, reduces trace volume coordination complexity
-   - **Cons**: Limited control over llm-d-specific sampling rates, potential gaps if upstream has aggressive sampling
+**Configuration:**
+```bash
+OTEL_TRACES_SAMPLER=parentbased_traceidratio
+OTEL_TRACES_SAMPLER_ARG=0.1  # 10% sampling
+```
 
-2. **Always-Sample**: Sample all llm-d operations regardless of upstream decisions
-   - **Pros**: Guaranteed llm-d observability, simplified configuration, complete coverage of LLM inference operations
-   - **Cons**: Can create trace volume inconsistencies, may violate upstream sampling budgets, potential performance impact
-
-3. **Kubernetes-Style Span Linking**: Link to upstream span information while maintaining independent sampling decisions
-   - **Pros**: Preserves upstream correlation while enabling llm-d-specific sampling control, balances trace continuity with operational needs
-   - **Cons**: More complex implementation, requires careful span link management, may complicate trace analysis
-
-**Recommended Implementation:**
-- **Default**: Parent-based sampling to maintain ecosystem compatibility
-- **Configuration**: Allow operators to override with always-sample or custom sampling rates for critical LLM workloads
-- **Span Links**: Implement span linking as enhancement for preserving upstream correlation when using independent sampling
-
-**Auto-instrumentation Sampling:**
-Auto-instrumentation agents typically support parent-based sampling by default, making this approach consistent with the zero-configuration design
-while enabling customization through agent configuration.
+Sampling decision is made at trace entry (gateway) and propagated to all components via trace context.
 
 ## Implementation Approach
 
-The implementation establishes end-to-end tracing across llm-d components using auto-instrumentation.
-The approach progresses from vLLM v1 tracing support to proposed implementations in llm-d components.
+The implementation uses **manual OpenTelemetry instrumentation** across llm-d components. Each component explicitly
+initializes its tracer and creates custom spans around critical operations.
 
-**Current Implementation Status:**
-- **vLLM v1**: Tracing support with `from vllm.tracing import init_tracer`
-- **llm-d Components**: Working branch implementations demonstrate feasibility of auto-instrumentation approach
+**Current Status:**
+- **Gateway**: OTel SDK initialized (`pkg/common/telemetry.go`), zero custom spans
+- **vLLM v1**: Tracer initialized, one custom span (`llm_request` at completion)
 
-**Proposed Auto-instrumentation Pattern:**
-Based on working branch prototypes, each component implements:
-- Auto-instrumentation using `otel.GetTracerProvider().Tracer()` without explicit initialization
-- Multiple spans per operation with attributes
-- Error tracking and operational outcome recording
-- Zero-configuration operation compatible with external auto-instrumentation agents
+**Implementation Pattern:**
 
-**Proposed Examples:**
-- **llm-d-kv-cache-manager**: Detailed spans for `GetPodScores` with sub-operations (`find_tokens`, `tokens_to_block_keys`, `lookup_pods`, `score_pods`)
-- **llm-d-inference-scheduler**: EPP pre-request plugin spans with P/D disaggregation tracking
-- **llm-d-routing-sidecar (P/D Proxy)**: HTTP instrumentation via `otelhttp` with custom protocol spans
-- **vLLM v1**: Tracer initialization and output processor integration
+```go
+// Gateway (Go)
+tracer := otel.Tracer("gateway-api-inference-extension")
+ctx, span := tracer.Start(ctx, "gateway.scheduler.schedule")
+defer span.End()
+
+span.SetAttributes(
+    attribute.String("scheduler.policy", policy),
+    attribute.Int("candidates.count", len(candidates)),
+)
+```
+
+```python
+# vLLM (Python)
+with self.tracer.start_as_current_span("vllm.scheduler.schedule") as span:
+    span.set_attribute("batch.total_tokens", total_tokens)
+```
 
 ### Components
 
-#### **`llm-d-inference-scheduler (Endpoint Picker Protocol)`**
+#### **Inference Gateway (gateway-api-inference-extension)**
 
-  * **Component Architecture**: The llm-d inference scheduler implements the Endpoint Picker Protocol (EPP), operating as a gRPC service that
-receives routing requests from the inference gateway and makes intelligent endpoint selection decisions. It functions as an endpoint picker within the broader inference gateway system.
+**Key Spans:**
+- `gateway.request`: Top-level request span with request metadata (SERVER span)
+- `gateway.director.handle_request`: Admission control decisions (INTERNAL span)
+- `gateway.scheduler.schedule`: Pod selection with filter/scorer details (INTERNAL span)
 
-  * **Instrumentation Focus**: This component is responsible for making smart load-balancing and routing decisions,
-applying filtering and scoring algorithms based on awareness of P/D, KV-cache, SLA, and load.
+**Trace Context Propagation:**
+- W3C trace context (traceparent, tracestate) injected into HTTP headers when proxying to vLLM backends
+- Enables end-to-end distributed tracing across gateway and vLLM components
 
-  * **Auto-instrumentation Implementation**:
-    - **Tracing Infrastructure**: Auto-instrumentation using `otel.Tracer("llm-d-inference-scheduler")` without explicit initialization
-    - **Initial Spans**:
-      - `llm_d.epp.pd_prerequest`: P/D disaggregation pre-request plugin operation
-    - **Basic Attributes**:
-      - `llm_d.epp.pd.disaggregation_enabled`: Whether P/D disaggregation is active
-      - `llm_d.epp.pd.prefill_pod_address`: Selected prefill pod address (when applicable)
-      - `operation.outcome`: success/error
-    - **Context Propagation**: Maintains trace context across EPP operations and downstream calls using global tracer
-    - **Benefit**: Establishes EPP visibility in end-to-end traces, P/D disaggregation tracking with zero configuration
+**Critical Attributes:**
+- Request: model name, request size, streaming mode, token counts
+- Director: candidate pods, admission priority, result (admitted/rejected), target pod
+- Scheduler: candidate count, request ID, scheduling result, selected pod name/namespace
 
+#### **KV Cache Manager**
 
-#### **`llm-d-kv-cache-manager`**
+**Key Spans:**
+- `kvcache.manager.get_scores`: Main scoring operation
+- `kvcache.storage.lookup`: Storage backend lookup
+- `kvcache.scorer.compute`: Scoring algorithm execution
 
-  * **Instrumentation Focus**: This component manages a global view of KV cache states and localities, for optimizing LLM inference by reusing
-    computed key/value attention vectors. It interacts with storage to index KV block availability.
+**Critical Attributes:**
+- Model identifier, pod count, cache hit ratio, blocks available
 
-  * **Auto-instrumentation Implementation**:
-    - **Tracing Infrastructure**: Auto-instrumentation using `otel.Tracer("llm-d-kv-cache-manager")` without explicit initialization
-    - **Initial Spans**:
-      - `llm_d.kv_cache_manager.GetPodScores`: Main cache scoring operation (entry → response)
-      - `llm_d.kv_cache_manager.find_tokens`: Tokenization operation with token count metrics
-      - `llm_d.kv_cache_manager.tokens_to_block_keys`: Block key generation from tokens
-      - `llm_d.kv_cache_manager.lookup_pods`: Storage lookup operations for KV block availability
-      - `llm_d.kv_cache_manager.score_pods`: Pod scoring algorithm execution
-    - **Basic Attributes**:
-      - `gen_ai.request.model`: Model identifier (all spans)
-      - `llm_d.kv_cache_manager.hit_ratio`: Cache hit ratio for the request (GetPodScores span)
-      - `llm_d.kv_cache_manager.pod_count`: Number of pods considered (GetPodScores span)
-      - `llm_d.kv_cache_manager.tokens_found`: Number of tokens found during tokenization
-      - `llm_d.kv_cache_manager.input_tokens`: Input token count for block key generation
-      - `llm_d.kv_cache_manager.block_keys_generated`: Number of block keys generated
-      - `llm_d.kv_cache_manager.block_keys_count`: Block keys used for lookup/scoring
-      - `llm_d.kv_cache_manager.lookup_results`: Number of lookup results from storage
-      - `llm_d.kv_cache_manager.scored_pods`: Number of pods that received scores
-      - `operation.outcome`: success/error/timeout (all spans)
-    - **Context Propagation**: Maintains trace context across cache operations using global tracer
-    - **Benefit**: Provides granular performance analysis of KV cache operations with detailed sub-operation visibility for production debugging
+#### **P/D Proxy (Transitional)**
 
-#### **`P/D Proxy (llm-d-routing-sidecar)` - Transitional**
+Minimal instrumentation recommended given deprecation plans. Basic `pd_proxy.request` span with disaggregation metadata only.
 
-  * **Instrumentation Focus**: This component currently acts as a reverse proxy for P/D (Prefill/Decode) disaggregation. However, this component is
-    planned for removal as part of the architectural evolution toward direct vLLM disaggregation.
+#### **vLLM Instances**
 
-  * **Architectural Transition**:
-    **P/D Proxy Removal**: As part of llm-d's architectural evolution, this component will be replaced by native vLLM disaggregation capabilities.
-    Future vLLM disaggregation work will move P/D routing logic directly into vLLM components, eliminating the need for external P/D proxies and providing more direct,
-    efficient tracing through vLLM's native instrumentation.
+**Current Status:** Production-ready tracing already implemented with comprehensive request-level observability.
 
-#### **`vLLM Instances`**
+**Key Span:**
+- `llm_request`: Full request lifecycle from arrival to completion (SERVER span)
+  - Created at request completion in OutputProcessor
+  - Extracts and continues trace context from incoming HTTP headers
+  - Captures complete latency breakdown and usage metrics
 
-  * **Current Status**: **Full tracing support in vLLM v1** - vLLM v1 includes tracing infrastructure with `from vllm.tracing import init_tracer` and tracer integration in the LLM engine.
+**Critical Attributes:**
+- Latency: TTFT (time to first token), E2E latency, queue time, prefill time, decode time, inference time
+- Usage: prompt tokens, completion tokens
+- Request params: model, temperature, top_p, max_tokens, n (number of completions)
+- Request ID for correlation
 
-  * **Instrumentation Focus**: llm-d leverages vLLM as its reference LLM inference engine. vLLM v1's tracing support provides essential LLM observability capabilities.
-
-  * **Native Tracing Implementation**:
-    - **Built-in Instrumentation**: vLLM uses its own native tracing system, not auto-instrumentation
-    - **Tracer Initialization**: `tracer = init_tracer()` in LLMEngine with output processor integration
-    - **Spans**: vLLM inference request processing with configurable tracing backend
-    - **Attributes**: Model execution metadata and performance characteristics
-    - **Context Propagation**: Native trace context handling through vLLM processing pipeline
-    - **Integration**: Works directly with OpenTelemetry without requiring external auto-instrumentation agents
-    - **Security Compliance**: vLLM's tracing implementation fully aligns with the security goals outlined in this proposal, capturing only performance metrics, token counts, and request parameters while avoiding any prompt or completion content
-
-  * **Enhanced Integration Opportunities**:
-    Future vLLM disaggregation work will enable direct tracing through vLLM components, eliminating dependency on P/D proxy patterns and providing native P/D tracing visibility.
-
-#### **`Inference Gateway (gateway-api-inference-extension)`**
-
-  * **Instrumentation Focus**: This component serves as the entry point for inference requests, providing optimized routing and load balancing.
-
-  * **Auto-instrumentation Implementation**:
-    - **Tracing Infrastructure**: Auto-instrumentation using `otel.Tracer("gateway-api-inference-extension")` without explicit initialization
-    - **Initial Spans**:
-      - `llm_d.gateway.request`: Main gateway request processing
-    - **Basic Attributes**:
-      - HTTP method and route attributes (via otelhttp instrumentation)
-      - Request/response timing (automatic via span duration)
-    - **Context Propagation**: Create root trace context, propagate to EPP and model instances using global tracer
-    - **Benefit**: Establishes gateway entry point visibility in end-to-end traces with zero configuration
-
+**Trace Context Support:**
+- Automatically extracts W3C trace context (traceparent, tracestate) from HTTP request headers
+- Continues traces initiated by upstream components (e.g., gateway)
+- Creates new traces for requests without incoming trace context
 
 ### Enabling Distributed Tracing
 
-The auto-instrumentation approach eliminates the need for component-specific configuration. Tracing is enabled by
-deploying an auto-instrumentation agent or operator that configures the global OpenTelemetry TraceProvider.
+Each component requires **explicit trace initialization** in code:
 
-**Triggering Auto-instrumentation:**
-This implementation supports multiple approaches for enabling tracing:
+**Gateway (Go):**
+```go
+// Already implemented in pkg/common/telemetry.go
+func InitTracing(ctx context.Context) error {
+    // Creates TracerProvider with OTLP exporter
+    // Sets up W3C propagation, configures sampling
+}
+```
 
-1. **OpenTelemetry Operator** (Recommended for Kubernetes): Automatically injects instrumentation via annotations
-   - Documentation: [OpenTelemetry Operator](https://opentelemetry.io/docs/kubernetes/operator/)
+**vLLM (Python):**
+```python
+# Already implemented in async_llm.py
+tracer = init_tracer("vllm.llm_engine", otlp_endpoint)
+```
 
-2. **Go Auto-instrumentation Agent**: Manual agent that wraps Go applications at runtime
-   - Documentation: [OpenTelemetry Go Auto-instrumentation](https://opentelemetry.io/docs/zero-code/go/)
+**Configuration:**
+```bash
+# Gateway
+OTEL_SERVICE_NAME=gateway-api-inference-extension
+OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
+OTEL_TRACES_SAMPLER=parentbased_traceidratio
+OTEL_TRACES_SAMPLER_ARG=0.1
 
-3. **Programmatic TraceProvider Setup**: Simple global tracer provider initialization for testing
-   - Documentation: [OpenTelemetry Go Manual Instrumentation](https://opentelemetry.io/docs/languages/go/getting-started/)
-
-**Auto-instrumentation Benefits:**
-- **Zero Configuration**: Components use `otel.Tracer()` calls that work with any auto-instrumentation agent
-- **Agent-Driven**: External auto-instrumentation agents provide TraceProvider configuration
-- **Platform Agnostic**: Compatible with various observability platforms and deployment methods
-- **Lightweight**: Components remain minimal with reduced tracing dependencies
+# vLLM
+vllm_config.observability_config.otlp_traces_endpoint = "http://otel-collector:4317"
+```
 
 
 ### Trace Context Propagation
 
-**Automatic Context Propagation:**
+The gateway injects W3C trace context into HTTP headers when proxying requests to vLLM backends:
 
-* Components automatically extract incoming trace context from HTTP/gRPC headers
-* Trace context is automatically propagated to downstream service calls
-* Context is included in outgoing HTTP/gRPC headers without manual intervention
+```go
+// In gateway request handler (generateHeaders function)
+traceHeaders := make(map[string]string)
+propagator := otel.GetTextMapPropagator()
+propagator.Inject(ctx, propagation.MapCarrier(traceHeaders))
 
-This provides end-to-end trace continuity across llm-d when an auto-instrumentation agent is active.
+// Headers include: traceparent, tracestate
+// These are added to the HTTP request forwarded to vLLM
+```
 
-**Performance Impact:**
-Auto-instrumentation has minimal overhead when no tracing agent is present:
-- Components use `otel.Tracer()` calls that default to no-op implementations
-- Context propagation is lightweight and stateless
-- Header extraction/injection operations are constant-time
-- No spans are created or exported without an active TraceProvider
+vLLM automatically extracts trace context from incoming HTTP headers (already implemented). This creates parent-child span relationships across components, enabling end-to-end distributed tracing from gateway through vLLM.
 
 ### Semantic Conventions and Attributes
 
-The implementation follows OpenTelemetry semantic conventions for GenAI operations:
+**OpenTelemetry GenAI Conventions:**
+- `gen_ai.request.model`, `gen_ai.request.id`
+- `gen_ai.usage.prompt_tokens`, `gen_ai.usage.completion_tokens`
+- `gen_ai.latency.*` (TTFT, queue time, prefill/decode time)
 
-**OpenTelemetry Standard Attributes** (implemented across components):
-- `gen_ai.request.model`: Model identifier (all components)
-- `gen_ai.usage.input_tokens`: Input token count (vLLM only)
-- `gen_ai.usage.output_tokens`: Output token count (vLLM only)
-- `operation.outcome`: success/error/timeout (all components)
-- `http.request.method`: HTTP request method (gateway)
-- `http.route`: HTTP request route (gateway)
-- `http.response.status_code`: HTTP response status (gateway)
-- Request duration (automatic via span timing)
+**llm-d Custom Attributes:**
+- Namespace: `llm_d.*` or component-specific (`vllm.*`, `kvcache.*`)
+- Avoid high-cardinality attributes
+- Record errors: `span.RecordError(err)`, `span.SetStatus(codes.Error, msg)`
 
-**llm-d Specific Attributes**:
+## Alternatives Considered
 
-*Inference Scheduler (EPP):*
-- `llm_d.epp.pd.disaggregation_enabled`: P/D disaggregation status
-- `llm_d.epp.pd.prefill_pod_address`: Selected prefill pod address
+**Auto-Instrumentation via Agents:**
+- Rejected: Provides only generic HTTP/gRPC spans without llm-d-specific decision visibility (scheduling, caching, batching)
+- Cannot expose internal operations critical for debugging LLM workloads
 
-*KV Cache Manager:*
-- `llm_d.kv_cache_manager.hit_ratio`: Cache hit ratio for the request
-- `llm_d.kv_cache_manager.pod_count`: Number of pods considered
-- `llm_d.kv_cache_manager.tokens_found`: Number of tokens found during tokenization
-- `llm_d.kv_cache_manager.input_tokens`: Input token count for block key generation
-- `llm_d.kv_cache_manager.block_keys_generated`: Number of block keys generated
-- `llm_d.kv_cache_manager.block_keys_count`: Block keys used for lookup/scoring
-- `llm_d.kv_cache_manager.lookup_results`: Number of lookup results from storage
-- `llm_d.kv_cache_manager.scored_pods`: Number of pods that received scores
-
-*Routing Sidecar (P/D Proxy):*
-- `llm_d.proxy.connector`: Proxy connector type (e.g., "nixlv2")
-- `llm_d.prefill.target_host`: Target prefill host for disaggregation
-- `llm_d.nixl.stage`: NIXL protocol stage ("prefill" or "decode")
-
-## Alternatives
-
-### Manual Instrumentation Per Component
-
-Platform operators could manually instrument each llm-d component independently, configuring OpenTelemetry for each service separately.
-While this provides maximum flexibility, it significantly increases operational complexity and error surface.
-In the case where a single component is not instrumented, the ability to correlate trace data between components is lost. In other words, even when
-disabling traces for a single component, the trace header should still be propagated.
-
-### Third-party APM Solutions
-
-Commercial APM solutions could provide automatic instrumentation. Note that most vendors already base their agents on otel instrumentation anyways.
-However, these solutions may lack the GenAI-specific semantic conventions needed for LLM workload analysis and introduce vendor lock-in.
+**Third-Party APM Solutions:**
+- Rejected: Vendor lock-in, may lack GenAI semantic conventions, less control over security
 
 ## Security Considerations
 
-### Data Sensitivity in LLM Inference
-
-LLM inference workloads process highly sensitive data including proprietary prompts, personal information, confidential business data, and intellectual property.
-LLM queries and responses frequently contain:
-
-- Confidential communications
-- Personal identifiable information (PII) and regulated data
-- Proprietary code, algorithms, and technical specifications
-- Sensitive healthcare, financial, or legal information
-
-This sensitive data requires specialized handling in observability systems to prevent inadvertent exposure through trace data.
-
-### Tracing Security Model
-
-This proposal implements a **metadata-only tracing approach** that provides operational visibility while protecting sensitive data:
+### Metadata-Only Tracing
 
 **What is Captured:**
-- Request timing and performance metrics (TTFT, ITL, total latency)
-- Model identifiers, component routing decisions, and operational metadata
-- Error classifications, timeout events, and success/failure states
-- Component-to-component communication patterns and trace context
-- KV cache hit ratios and pod selection metadata
+- Timing metrics (TTFT, ITL, latency), token **counts** (not actual tokens)
+- Model identifiers, routing decisions, operational metadata
+- Error states, KV cache hit ratios, component communication patterns
 
-**What is Explicitly Excluded:**
-- Request payloads (prompts, user inputs, system messages)
-- Response content (generated text, completions, model outputs)
-- Intermediate processing content (embeddings, vector representations)
-- Any form of request/response body content or headers containing sensitive data
+**What is Excluded:**
+- Request payloads (prompts, inputs, messages)
+- Response content (generated text, completions)
+- Actual tokens or token IDs
 
-### Security Goals
+### Security Benefits of Manual Instrumentation
 
-* **Data Privacy by Design**: Ensure no sensitive request/response content is captured in trace data, regardless of trace export destination or retention policies.
+- **Explicit Control**: Developers consciously decide what enters spans (code review catches issues)
+- **No Accidental Exposure**: No dependency on agent configuration for security
+- **Auditable**: All span attributes visible in code
 
-* **Operational Security**: Provide sufficient observability for performance optimization and debugging without compromising data confidentiality or regulatory compliance.
-
-* **Secure Configuration**: Enable tracing through well-defined, auditable configuration paths that maintain security boundaries across llm-d components.
-
-### Implementation Security Measures
-
-**Auto-instrumentation Security Configuration:**
-Since this proposal uses auto-instrumentation via external agents/operators, individual components cannot directly configure HTTP instrumentation options.
-Security must be ensured at the auto-instrumentation agent level:
-
-- **OpenTelemetry Operator**: HTTP instrumentation configuration must be set in the `Instrumentation` resource to prevent body capture
-- **Go Auto-instrumentation Agent**: Agent configuration must disable HTTP body events and sensitive data capture
-- **Environment Variables**: Agents typically support `OTEL_*` environment variables to control instrumentation behavior
-
-**Component-Level Security (Manual Configuration Example):**
-When manual instrumentation is needed, use the following for security requirements:
+### Implementation
 
 ```go
-// Manual secure HTTP instrumentation (only when auto-instrumentation insufficient)
-handler := otelhttp.NewHandler(
-    http.HandlerFunc(yourHandler),
-    "operation_name",
-    // Omit WithMessageEvents to prevent body capture
-    otelhttp.WithFilter(func(r *http.Request) bool {
-        return !strings.Contains(r.URL.Path, "/sensitive")
-    }),
+// SAFE: Metadata only
+span.SetAttributes(
+    attribute.Int("gen_ai.usage.prompt_tokens", len(tokens)),
+    attribute.String("gen_ai.request.model", "llama-2-70b"),
+)
+
+// NEVER DO THIS - FORBIDDEN
+span.SetAttributes(
+    attribute.String("request.prompt", userPrompt),  // Exposes sensitive data
 )
 ```
 
-**Auto-instrumentation Limitation:**
-The auto-instrumentation approach introduces a security dependency on external agent configuration. If auto-instrumentation agents enable HTTP body capture by default,
-sensitive data exposure could occur without application-level control.
+**Additional Measures:**
+- Use TLS for OTLP export
+- Treat trace data as operationally sensitive
+- Configure appropriate retention policies
 
-**Span Attribute Filtering:**
-All components implement attribute filtering to ensure no sensitive data enters span attributes. Content hashes, fingerprints, and detailed error messages are explicitly avoided.
+## Implementation Phases
 
-**Context Propagation Security:**
-Trace context propagation uses standard OpenTelemetry headers (traceparent, tracestate) that contain only trace identifiers and do not carry business data or user content.
+### Phase 1: Core Request Lifecycle (Completed)
 
-**Export Security:**
-Trace data export follows OpenTelemetry security best practices including:
-- TLS encryption for trace data transmission
-- Authentication and authorization for trace collectors
-- Configurable retention policies aligned with data governance requirements
+**Gateway (gateway-api-inference-extension):**
+- `gateway.request` - Top-level request span with model, size, streaming, token counts
+- `gateway.director.handle_request` - Admission control with candidate pods, priority, result
+- `gateway.scheduler.schedule` - Scheduling decisions with candidate count, selected pod
+- Trace context injection in HTTP headers to vLLM backends (traceparent, tracestate)
 
-**Component Isolation:**
-Auto-instrumentation ensures that individual component failures or misconfigurations cannot expose data from other components, maintaining security boundaries across the llm-d stack.
+**vLLM:**
+- `llm_request` - Full lifecycle span with TTFT, E2E latency, queue time, prefill/decode breakdown, token counts, request parameters
+- Trace context extraction from HTTP headers (already implemented)
 
-### Operational Security Considerations
+**KV Cache Manager:**
+- `kvcache.manager.get_scores` - Main scoring operation with model, pod count, hit ratio
+- `kvcache.storage.lookup` - Storage backend lookup (INTERNAL span)
+- `kvcache.scorer.compute` - Scoring algorithm execution (INTERNAL span)
 
-**Production Deployment:**
-- Trace data should be treated as operationally sensitive metadata requiring appropriate access controls
-- Export destinations should implement security controls consistent with organizational data governance policies
-- Trace retention policies should align with operational needs while minimizing data exposure duration
+**Status:** Implemented and documented. End-to-end distributed tracing functional across gateway, vLLM, and KV cache manager.
+
+### Phase 2: Detailed Observability (Future)
+
+**Gateway:**
+- Scheduler child spans (filters, scorers, pickers) for detailed scheduling decision visibility
+- Response processing spans for streaming response handling
+
+**Deliverable:** Enhanced decision visibility and response processing metrics
+
+### Phase 3: Advanced Features (Future)
+
+- Flow control spans (queue management, fairness)
+- Fine-grained vLLM internal spans (worker communication, model execution steps)
+- P/D disaggregation spans (prefill/decode coordination)
