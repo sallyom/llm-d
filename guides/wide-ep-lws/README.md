@@ -2,18 +2,21 @@
 
 ## Overview
 
-This guide demonstrates how to deploy DeepSeek-R1-0528 using vLLM's P/D disaggregation support with NIXL in a wide expert parallel pattern with LeaderWorkerSets. This guide has been validated on a cluster with 24xH200 GPUs split across three nodes with InfiniBand networking.
+This guide demonstrates how to deploy DeepSeek-R1-0528 using vLLM's P/D disaggregation support with NIXL in a wide expert parallel pattern with LeaderWorkerSets. This guide has been validated on:
+
+* a 32xH200 cluster with InfiniBand networking
+* a 32xH200 cluster on GKE with RoCE networking
 
 > WARNING: We are still investigating and optimizing performance for other hardware and networking configurations
 
 In this example, we will demonstrate a deployment of `DeepSeek-R1-0528` with:
 
-- 1 DP=8 Prefill Workers
-- 2 DP=8 Decode Workers
+- 1 DP=16 Prefill Worker
+- 1 DP=16 Decode Worker
 
 ## Hardware Requirements
 
-This guide requires 24 Nvidia H200 GPUs and InfiniBand RDMA. It requires 1024 Gi of memory across and 128 Gi of ephemeral storage all 3 pods (512 Gi memory and 64 Gi storage for both Decode pods together and 512 Gi memory and 64 Gi storage for the prefill pod).
+This guide requires 32 Nvidia H200 GPUs and InfiniBand or RoCE RDMA networking. Check `modelserver/base/decode.yaml` and `modelserver/base/prefill.yaml` for detailed resource requirements.
 
 ## Prerequisites
 
@@ -32,6 +35,7 @@ Use the helmfile to compose and install the stack. The Namespace in which the st
 
 ```bash
 export NAMESPACE=llm-d-wide-ep # or any other namespace
+cd guides/wide-ep-lws/
 kubectl create namespace ${NAMESPACE}
 ```
 
@@ -56,20 +60,25 @@ helm install deepseek-r1 \
   -f inferencepool.values.yaml \
   --set "provider.name=gke" \
   --set "inferencePool.apiVersion=inference.networking.k8s.io/v1" \
-  oci://us-central1-docker.pkg.dev/k8s-staging-images/gateway-api-inference-extension/charts/inferencepool --version v1.0.1-rc.1
+  --set "inferenceExtension.monitoring.gke.enable=true" \
+  oci://us-central1-docker.pkg.dev/k8s-staging-images/gateway-api-inference-extension/charts/inferencepool \
+  --version v1.0.1
 
 # For Istio
 helm install deepseek-r1 \
   -n ${NAMESPACE} \
   -f inferencepool.values.yaml \
   --set "provider.name=istio" \
-  oci://us-central1-docker.pkg.dev/k8s-staging-images/gateway-api-inference-extension/charts/inferencepool --version v1.0.1-rc.1
+  --set "inferenceExtension.monitoring.prometheus.enable=true" \
+  oci://us-central1-docker.pkg.dev/k8s-staging-images/gateway-api-inference-extension/charts/inferencepool \
+  --version v1.0.1
 
 # For Kgateway
 helm install deepseek-r1 \
   -n ${NAMESPACE} \
   -f inferencepool.values.yaml \
-  oci://us-central1-docker.pkg.dev/k8s-staging-images/gateway-api-inference-extension/charts/inferencepool --version v1.0.1-rc.1
+  oci://us-central1-docker.pkg.dev/k8s-staging-images/gateway-api-inference-extension/charts/inferencepool \
+  --version v1.0.1
 ```
 
 ### Deploy Gateway and HTTPRoute
@@ -94,6 +103,10 @@ To see what gateway options are supported refer to our [gateway provider prereq 
 
 You can also customize your gateway, for more information on how to do that see our [gateway customization docs](../../docs/customizing-your-gateway.md).
 
+## Tuning Selective PD
+
+As with PD, the `wide-ep-lws` guide supports selective PD. For information on this refer to [this section of the PD docs](../pd-disaggregation/README.md#tuning-selective-pd).
+
 ## Verifying the installation
 
 - Firstly, you should be able to list all helm releases installed into your chosen namespace:
@@ -114,6 +127,8 @@ pod/wide-ep-llm-d-decode-0                   2/2     Running   0          2m13s
 pod/wide-ep-llm-d-decode-0-1                 2/2     Running   0          2m13s
 pod/deepseek-r1-epp-84dd98f75b-r6lvh         1/1     Running   0          2m14s
 pod/wide-ep-llm-d-prefill-0                  1/1     Running   0          2m13s
+pod/wide-ep-llm-d-prefill-0-1                1/1     Running   0          2m13s
+
 
 NAME                                            TYPE           CLUSTER-IP    EXTERNAL-IP   PORT(S)                        AGE
 service/infra-wide-ep-inference-gateway-istio   ClusterIP      10.16.1.34    10.16.4.2     15021:30312/TCP,80:33662/TCP   2m22s
@@ -134,6 +149,7 @@ NAME                                                      READY   AGE
 statefulset.apps/wide-ep-llm-d-decode     1/1     2m13s
 statefulset.apps/wide-ep-llm-d-decode-0   1/1     2m13s
 statefulset.apps/wide-ep-llm-d-prefill    1/1     2m13s
+statefulset.apps/wide-ep-llm-d-prefill-1  1/1     2m13s
 ```
 
 **_NOTE:_** This assumes no other guide deployments in your given `${NAMESPACE}` and you have not changed the default release names via the `${RELEASE_NAME}` environment variable.

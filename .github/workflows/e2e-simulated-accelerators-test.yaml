@@ -122,7 +122,7 @@ jobs:
       - name: Install monitoring stack
         run: |
           cd docs/monitoring
-          ./install-prometheus-grafana.sh
+          ./scripts/install-prometheus-grafana.sh
 
       - name: Deploy simulation services with helmfile
         env:
@@ -131,6 +131,12 @@ jobs:
           cd guides/simulated-accelerators
           helmfile apply -e ${GATEWAY_TYPE}
 
+      - name: Deploy the httpRoute
+        run: |
+          cd guides/simulated-accelerators
+          echo "Deploying HTTPRoute..."
+          kubectl apply -f httproute.yaml -n ${{ env.NAMESPACE }}
+
       - name: Wait for all simulation pods to be ready
         run: |
           echo "⏳ Waiting for all pods in namespace '${{ env.NAMESPACE }}' to become ready..."
@@ -138,7 +144,7 @@ jobs:
             --for=condition=Ready \
             --all \
             -n "${{ env.NAMESPACE }}" \
-            --timeout=2m
+            --timeout=5m
 
           echo "✅ All pods are ready."
           kubectl get pods -n "${{ env.NAMESPACE }}"

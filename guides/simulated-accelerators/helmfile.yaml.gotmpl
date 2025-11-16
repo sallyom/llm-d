@@ -32,15 +32,13 @@ releases:
       type: infrastructure
       kind: inference-stack
     values:
-    {{- if (eq .Environment.Name "gke") }}
       - gateway: 
           {{ .Environment.Values.gateway | toYaml | nindent 10 }}
-    {{- end }}
 
   - name: {{ printf "gaie-%s" $rn | quote }}
     namespace: {{ $ns }}
     chart: oci://registry.k8s.io/gateway-api-inference-extension/charts/inferencepool
-    version: v1.0.1-rc.1
+    version: v1.0.1
     installed: true
     needs:
       - {{ printf "infra-%s" $rn | quote }}
@@ -51,6 +49,12 @@ releases:
           name: {{ .Environment.Values.provider.name }}
         inferencePool:
           apiVersion: {{ .Environment.Values.inferencePool.apiVersion }}
+        inferenceExtension:
+          monitoring:
+            gke:
+              enabled: true
+            prometheus:
+              enabled: false
     {{- else if or (eq .Environment.Name "istio") (eq .Environment.Name "default") }}
       - provider:
           name: {{ .Environment.Values.provider.name }}
@@ -66,7 +70,7 @@ releases:
   - name: {{ printf "ms-%s" $rn | quote }}
     namespace: {{ $ns }}
     chart: llm-d-modelservice/llm-d-modelservice
-    version: v0.2.10
+    version: v0.2.11
     installed: true
     needs:
       - {{ printf "infra-%s" $rn | quote }}

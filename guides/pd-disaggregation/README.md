@@ -83,13 +83,13 @@ Follow provider specific instructions for installing HTTPRoute.
 #### Install for "kgateway" or "istio"
 
 ```bash
-kubectl apply -f httproute.yaml
+kubectl apply -f httproute.yaml -n ${NAMESPACE}
 ```
 
 #### Install for "gke"
 
 ```bash
-kubectl apply -f httproute.gke.yaml
+kubectl apply -f httproute.gke.yaml -n ${NAMESPACE}
 ```
 
 ## Verify the Installation
@@ -99,7 +99,7 @@ kubectl apply -f httproute.gke.yaml
 ```bash
 helm list -n ${NAMESPACE}
 NAME        NAMESPACE   REVISION    UPDATED                                 STATUS      CHART                       APP VERSION
-gaie-pd     llm-d-pd    1           2025-08-24 12:54:51.231537 -0700 PDT    deployed    inferencepool-v1.0.1-rc.1        v1.0.1-rc.1
+gaie-pd     llm-d-pd    1           2025-08-24 12:54:51.231537 -0700 PDT    deployed    inferencepool-v1.0.1        v1.0.1
 infra-pd    llm-d-pd    1           2025-08-24 12:54:46.983361 -0700 PDT    deployed    llm-d-infra-v1.2.4          v0.2.0
 ms-pd       llm-d-pd    1           2025-08-24 12:54:56.736873 -0700 PDT    deployed    llm-d-modelservice-v0.2.9   v0.2.0
 ```
@@ -141,13 +141,31 @@ replicaset.apps/ms-pd-llm-d-modelservice-prefill-86f6fb7cdc   4         4       
 
 For instructions on getting started making inference requests see [our docs](../../docs/getting-started-inferencing.md)
 
+## Tuning Selective PD
+
+Selective PD is a feature in the `inference-scheduler` within the context of prefill-decode dissagregation, although it is disabled by default. This features enables routing to just decode even with the P/D deployed. To enable it, you will need to set `threshold` value for the `pd-profile-handler` plugin, in the [GAIE values file](./gaie-pd/values.yaml). You can see the value of this here:
+
+```bash
+cat gaie-pd/values.yaml | yq '.inferenceExtension.pluginsCustomConfig."pd-config.yaml"' | yq '.plugins[] | select(.type == "pd-profile-handler")'
+type: pd-profile-handler
+parameters:
+  threshold: 0 # update this
+  hashBlockSize: 5
+```
+
+Some examples in which you might want to do selective PD might include:
+- When the prompt is short enough that the amount of work split inference into prefill and decode phases, and then open a kv transfer between those two GPUs is greater than the amount of work to do both phases on the same decode inference worker.
+- When Prefill units are at full capacity.
+
+For information on this plugin, see our [`pd-profile-handler` docs in the inference-scheduler](https://github.com/llm-d/llm-d-inference-scheduler/blob/v0.3.0/docs/architecture.md?plain=1#L205-L210)
+
 ## Cleanup
 
 To remove the deployment:
 
 ```bash
 # Remove the model services
-helmfile destroy -n ${NAMESPACE} -e <your_environment>
+helmfile destroy -n ${NAMESPACE}
 
 # Remove the infrastructure
 helm uninstall ms-pd -n ${NAMESPACE}
@@ -157,8 +175,6 @@ helm uninstall infra-pd -n ${NAMESPACE}
 
 **_NOTE:_** If you set the `$RELEASE_NAME_POSTFIX` environment variable, your release names will be different from the command above: `infra-$RELEASE_NAME_POSTFIX`, `gaie-$RELEASE_NAME_POSTFIX` and `ms-$RELEASE_NAME_POSTFIX`.
 
-**_NOTE:_** You need to specify your `environment` with the `-e <environment>` flag to `helmfile` for removing a installation of the guide when using a non-default option. IE if you deploy with `-e istio` and undeploy `-e istioBench` or vice versa, it may fail. If you encounter this it is recommended to manually uninstall all 3 releases with `helm` as shown above.
-
 ### Cleanup HTTPRoute
 
 Follow provider specific instructions for deleting HTTPRoute.
@@ -166,13 +182,13 @@ Follow provider specific instructions for deleting HTTPRoute.
 #### Cleanup for "kgateway" or "istio"
 
 ```bash
-kubectl delete -f httproute.yaml
+kubectl delete -f httproute.yaml -n ${NAMESPACE}
 ```
 
 #### Cleanup for "gke"
 
 ```bash
-kubectl delete -f httproute.gke.yaml
+kubectl delete -f httproute.gke.yaml -n ${NAMESPACE}
 ```
 
 ## Customization

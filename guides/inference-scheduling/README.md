@@ -8,7 +8,10 @@ This profile defaults to the approximate prefix cache aware scorer, which only o
 
 ## Hardware Requirements
 
-This example out of the box requires 2 Nvidia GPUs of any kind (support determined by the inferencing image used).
+This example out of the box requires 2 GPUs of any supported kind:
+- **NVIDIA GPUs**: Any NVIDIA GPU (support determined by the inferencing image used)
+- **Intel XPU/GPUs**: Intel Data Center GPU Max 1550 or compatible Intel XPU device
+- **TPUs**: Google Cloud TPUs (when using GKE TPU configuration)
 
 ## Prerequisites
 
@@ -18,12 +21,15 @@ This example out of the box requires 2 Nvidia GPUs of any kind (support determin
 - [Create the `llm-d-hf-token` secret in your target namespace with the key `HF_TOKEN` matching a valid HuggingFace token](../prereq/client-setup/README.md#huggingface-token) to pull models.
 - Have the [Monitoring stack](../../docs/monitoring/README.md) installed on your system.
 
+
 ## Installation
 
 Use the helmfile to compose and install the stack. The Namespace in which the stack will be deployed will be derived from the `${NAMESPACE}` environment variable. If you have not set this, it will default to `llm-d-inference-scheduler` in this example.
 
+**_IMPORTANT:_** When using long namespace names (like `llm-d-inference-scheduler`), the generated pod hostnames may become too long and cause issues due to Linux hostname length limitations (typically 64 characters maximum). It's recommended to use shorter namespace names (like `llm-d`) and set `RELEASE_NAME_POSTFIX` to generate shorter hostnames and avoid potential networking or vLLM startup problems.
+
 ```bash
-export NAMESPACE=llm-d-inference-scheduler # or any other namespace
+export NAMESPACE=llm-d-inference-scheduler # or any other namespace (shorter names recommended)
 cd guides/inference-scheduling
 helmfile apply -n ${NAMESPACE}
 ```
@@ -32,9 +38,11 @@ helmfile apply -n ${NAMESPACE}
 
 **_NOTE:_** This uses Istio as the default provider, see [Gateway Options](./README.md#gateway-options) for installing with a specific provider.
 
-### Gateway options
+### Gateway and Hardware Options
 
-To see specify your gateway choice you can use the `-e <gateway option>` flag, ex:
+#### Gateway Options
+
+To specify your gateway choice you can use the `-e <gateway option>` flag, ex:
 
 ```bash
 helmfile apply -e kgateway -n ${NAMESPACE}
@@ -47,11 +55,21 @@ For DigitalOcean Kubernetes Service (DOKS):
 helmfile apply -e digitalocean -n ${NAMESPACE}
 ```
 
-**Note:** DigitalOcean deployment uses public Qwen/Qwen3-0.6B model (no HuggingFace token required) and is optimized for DOKS GPU nodes with automatic tolerations and node selectors. Gateway API v1 compatibility fixes are automatically included.
+ **_NOTE:_** DigitalOcean deployment uses public Qwen/Qwen3-0.6B model (no HuggingFace token required) and is optimized for DOKS GPU nodes with automatic tolerations and node selectors. Gateway API v1 compatibility fixes are automatically included.
 
 To see what gateway options are supported refer to our [gateway provider prereq doc](../prereq/gateway-provider/README.md#supported-providers). Gateway configurations per provider are tracked in the [gateway-configurations directory](../prereq/gateway-provider/common-configurations/).
 
 You can also customize your gateway, for more information on how to do that see our [gateway customization docs](../../docs/customizing-your-gateway.md).
+
+#### Hardware Backends
+
+Currently in the `inference-scheduling` example we suppport configurations for `xpu`, `tpu` and `cuda` GPUs. By default we use modelserver values supporting `cuda` GPUs, but to deploy on one of the other speciality hardware backends you may use:
+
+```bash
+helmfile apply -e xpu  -n ${NAMESPACE} # targets istio as gateway provider with XPU hardware
+# or
+helmfile apply -e gke_tpu  -n ${NAMESPACE} # targets GKE externally managed as gateway provider with TPU hardware
+```
 
 ### Install HTTPRoute
 
@@ -60,19 +78,19 @@ Follow provider specific instructions for installing HTTPRoute.
 #### Install for "kgateway" or "istio"
 
 ```bash
-kubectl apply -f httproute.yaml
+kubectl apply -f httproute.yaml -n ${NAMESPACE}
 ```
 
 #### Install for "gke"
 
 ```bash
-kubectl apply -f httproute.gke.yaml
+kubectl apply -f httproute.gke.yaml -n ${NAMESPACE}
 ```
 
 #### Install for "digitalocean"
 
 ```bash
-kubectl apply -f httproute.yaml
+kubectl apply -f httproute.yaml -n ${NAMESPACE}
 ```
 ## Verify the Installation
 
@@ -81,7 +99,7 @@ kubectl apply -f httproute.yaml
 ```bash
 helm list -n ${NAMESPACE}
 NAME                        NAMESPACE                 REVISION  UPDATED                               STATUS    CHART                     APP VERSION
-gaie-inference-scheduling   llm-d-inference-scheduler 1         2025-08-24 11:24:53.231918 -0700 PDT  deployed  inferencepool-v1.0.1-rc.1      v1.0.1-rc.1
+gaie-inference-scheduling   llm-d-inference-scheduler 1         2025-08-24 11:24:53.231918 -0700 PDT  deployed  inferencepool-v1.0.1      v1.0.1
 infra-inference-scheduling  llm-d-inference-scheduler 1         2025-08-24 11:24:49.551591 -0700 PDT  deployed  llm-d-infra-v1.3.3        v0.3.0
 ms-inference-scheduling     llm-d-inference-scheduler 1         2025-08-24 11:24:58.360173 -0700 PDT  deployed  llm-d-modelservice-v0.2.9 v0.2.0
 ```
@@ -124,7 +142,7 @@ To remove the deployment:
 
 ```bash
 # From examples/inference-scheduling
-helmfile destroy -n ${NAMESPACE} -e <your_environment>
+helmfile destroy -n ${NAMESPACE}
 
 # Or uninstall manually
 helm uninstall infra-inference-scheduling -n ${NAMESPACE}
@@ -134,8 +152,6 @@ helm uninstall ms-inference-scheduling -n ${NAMESPACE}
 
 **_NOTE:_** If you set the `$RELEASE_NAME_POSTFIX` environment variable, your release names will be different from the command above: `infra-$RELEASE_NAME_POSTFIX`, `gaie-$RELEASE_NAME_POSTFIX` and `ms-$RELEASE_NAME_POSTFIX`.
 
-**_NOTE:_** You need to specify your `environment` with the `-e <environment>` flag to `helmfile` for removing a installation of the guide when using a non-default option. IE if you deploy with `-e istio` and undeploy `-e istioBench` or vice versa, it may fail. If you encounter this it is recommended to manually uninstall all 3 releases with `helm` as shown above.
-
 ### Cleanup HTTPRoute
 
 Follow provider specific instructions for deleting HTTPRoute.
@@ -143,19 +159,19 @@ Follow provider specific instructions for deleting HTTPRoute.
 #### Cleanup for "kgateway" or "istio"
 
 ```bash
-kubectl delete -f httproute.yaml
+kubectl delete -f httproute.yaml -n ${NAMESPACE}
 ```
 
 #### Cleanup for "gke"
 
 ```bash
-kubectl delete -f httproute.gke.yaml
+kubectl delete -f httproute.gke.yaml -n ${NAMESPACE}
 ```
 
 #### Cleanup for "digitalocean"
 
 ```bash
-kubectl delete -f httproute.yaml
+kubectl delete -f httproute.yaml -n ${NAMESPACE}
 ```
 
 ## Customization

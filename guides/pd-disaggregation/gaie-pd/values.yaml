@@ -3,7 +3,7 @@ inferenceExtension:
   image:
     name: llm-d-inference-scheduler
     hub: ghcr.io/llm-d
-    tag: v0.3.0-rc.2
+    tag: v0.3.2
     pullPolicy: Always
   extProcPort: 9002
   pluginsConfigFile: "pd-config.yaml"
@@ -39,6 +39,17 @@ inferenceExtension:
         - pluginRef: queue-scorer
           weight: 1.0
         - pluginRef: max-score-picker
+
+  # Monitoring configuration for EPP
+  monitoring:
+    interval: "10s"
+    # Service account token secret for authentication
+    secret:
+      name: pd-gateway-sa-metrics-reader-secret
+    # Prometheus ServiceMonitor will be created when enabled for EPP metrics collection
+    prometheus:
+      enabled: true
+
 inferencePool:
   apiVersion: inference.networking.x-k8s.io/v1alpha2 # use old API version for inference
   targetPortNumber: 8000
@@ -46,4 +57,3 @@ inferencePool:
   modelServers:
     matchLabels:
       llm-d.ai/inferenceServing: "true"
-      llm-d.ai/model: ms-pd-llm-d-modelservice

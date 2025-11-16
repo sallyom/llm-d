@@ -16,7 +16,7 @@ spec:
   # For decode service, this is port 8200. Must use port name.
   - port: "metrics"
     path: /metrics
-    interval: 30s
+    interval: 5s
 ---
 # Source: llm-d-modelservice/templates/prefill-podmonitor.yaml
 apiVersion: monitoring.coreos.com/v1
@@ -37,4 +37,4 @@ spec:
   # For prefill, this is port 8000. Must use port name.
   - port: "metrics"
     path: /metrics
-    interval: 30s
+    interval: 5s

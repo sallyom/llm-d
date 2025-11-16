@@ -7,22 +7,16 @@ modelArtifacts:
 
 routing:
   servicePort: 8000
-  parentRefs:
-    - group: gateway.networking.k8s.io
-      kind: Gateway
-      # name: infra-sim-inference-gateway # set in helmfile
-
   proxy:
-    image: ghcr.io/llm-d/llm-d-routing-sidecar:v0.3.0-rc.2
+    image: ghcr.io/llm-d/llm-d-routing-sidecar:v0.3.0
     connector: nixlv2
     secure: false
 
   inferencePool:
     create: false
-    # name: gaie-sim # set in helmfile
 
   httpRoute:
-    create: true
+    create: false
 
   epp:
     create: false
@@ -38,7 +32,7 @@ decode:
       interval: "30s"
   containers:
   - name: "vllm"
-    image: "ghcr.io/llm-d/llm-d-inference-sim:v0.5.0"
+    image: "ghcr.io/llm-d/llm-d-inference-sim:v0.6.1"
     modelCommand: imageDefault
     ports:
       - containerPort: 8200
@@ -52,7 +46,7 @@ decode:
       mountPath: /.config
     startupProbe:
       httpGet:
-        path: /health
+        path: /v1/models
         port: 8200
       initialDelaySeconds: 15
       periodSeconds: 30
@@ -67,7 +61,7 @@ decode:
       failureThreshold: 3
     readinessProbe:
       httpGet:
-        path: /health
+        path: /v1/models
         port: 8200
       periodSeconds: 5
       timeoutSeconds: 2
@@ -87,7 +81,7 @@ prefill:
       interval: "30s"
   containers:
   - name: "vllm"
-    image: "ghcr.io/llm-d/llm-d-inference-sim:v0.5.0"
+    image: "ghcr.io/llm-d/llm-d-inference-sim:v0.6.1"
     modelCommand: imageDefault
     ports:
       - containerPort: 8000
@@ -101,7 +95,7 @@ prefill:
       mountPath: /.config
     startupProbe:
       httpGet:
-        path: /health
+        path: /v1/models
         port: 8000
       initialDelaySeconds: 15
       periodSeconds: 30
@@ -116,7 +110,7 @@ prefill:
       failureThreshold: 3
     readinessProbe:
       httpGet:
-        path: /health
+        path: /v1/models
         port: 8000
       periodSeconds: 5
       timeoutSeconds: 2

@@ -28,7 +28,7 @@ To add worker nodes with GPU capabilities to your ROSA cluster, you will create 
 
 Learn how to manage machinesets and configure them for specific instance types in the official documentation:
 
-- **Managing machinesets in OpenShift (applies to ROSA worker nodes):** [https://docs.openshift.com/container-platform/latest/machine\_management/creating-machinesets.html](https://docs.openshift.com/container-platform/latest/machine_management/creating-machinesets.html)
+- **Managing machinesets in OpenShift (applies to ROSA worker nodes):** [https://docs.openshift.com/container-platform/latest/machine_management/creating-machinesets.html](https://docs.openshift.com/container-platform/latest/machine_management/creating-machinesets.html)
 - **Adding machinesets with specific instance types (referencing AWS GPU instances):** Consult the AWS documentation for available GPU instance types (e.g., P, G, and Inf instances) and use the OpenShift machineset documentation to configure your machineset accordingly. [https://aws.amazon.com/ec2/instance-types/](https://aws.amazon.com/ec2/instance-types/)
 
 ## Step 3: Enable GPU support on OpenShift with the NFD and GPU Operators
@@ -41,6 +41,6 @@ Refer to the NVIDIA documentation for detailed instructions on installing and co
 
 ## Next Steps
 
-Once the operators are installed and configured, you can proceed with deploying llm-d using the llm-d-deployer quick start.
+Once the operators are installed and configured, you can proceed with deploying llm-d using the llm-d quick start.
 
-See the [README.md](../../README.md) for more information.
+See the [QUICKSTART.md](../../../guides/QUICKSTART.md) for more information.
