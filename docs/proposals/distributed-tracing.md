@@ -237,6 +237,71 @@ OTEL_TRACES_SAMPLER_ARG=0.1
 vllm_config.observability_config.otlp_traces_endpoint = "http://otel-collector:4317"
 ```
 
+### Practical Deployment Guide
+
+For complete deployment instructions with working examples, see the **[Distributed Tracing Setup Guide](../monitoring/tracing/README.md)**.
+
+The guide provides:
+
+**Infrastructure Setup:**
+- OpenTelemetry Collector deployment for trace collection and routing
+- Backend options: Jaeger (trace visualization) or Tempo (long-term storage with Grafana)
+- Service configuration and networking
+
+**Gateway Configuration:**
+Update Helm values to enable tracing:
+```yaml
+# guides/inference-scheduling/gaie-inference-scheduling/values.yaml
+inferenceExtension:
+  image:
+    hub: quay.io/yourrepo
+    tag: your-tracing-tag  # Built from add-otel-custom-spans branch
+
+  tracing:
+    enabled: true
+    otelExporterEndpoint: "http://llm-d-collector-collector.monitoring.svc.cluster.local:4317"
+    sampling:
+      sampler: "parentbased_traceidratio"
+      samplerArg: "0.1"  # 10% sampling
+
+  env:
+    - name: OTEL_TRACES_EXPORTER
+      value: otlp
+    - name: OTEL_EXPORTER_OTLP_PROTOCOL
+      value: grpc
+```
+
+**vLLM Configuration:**
+Update Model Service values to enable tracing:
+```yaml
+# guides/inference-scheduling/ms-inference-scheduling/values.yaml
+decode:
+  containers:
+  - name: "vllm"
+    image: your-vllm-image-with-otel:tag
+    args:
+      - "--otlp-traces-endpoint"
+      - "http://llm-d-collector-collector.monitoring.svc.cluster.local:4317"
+    env:
+      - name: OTEL_SERVICE_NAME
+        value: "vllm-decode"
+      - name: OTEL_PYTHON_FASTAPI_INSTRUMENTATION_HTTP_CAPTURE_HEADERS_SERVER_REQUEST
+        value: "traceparent,tracestate"
+```
+
+**KV Cache Manager Configuration:**
+Similar configuration pattern with OTLP endpoint and service name.
+
+**Accessing Traces:**
+- Jaeger UI: `kubectl port-forward -n monitoring service/jaeger 16686:16686`
+- Grafana with Tempo: Access via Grafana's Explore tab with Tempo datasource
+
+The guide includes:
+- Step-by-step deployment instructions
+- Example Helm values for all components
+- Jaeger and Tempo deployment manifests
+- OpenTelemetry Collector configuration
+- Troubleshooting tips and verification steps
 
 ### Trace Context Propagation
 
