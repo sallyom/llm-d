@@ -158,15 +158,18 @@ with self.tracer.start_as_current_span("vllm.scheduler.schedule") as span:
 #### **Inference Gateway (gateway-api-inference-extension)**
 
 **Key Spans:**
-- `gateway.request`: Top-level request span with request metadata
-- `gateway.scheduler.schedule`: Pod selection with filter/scorer details
-- `gateway.director.handle_request`: Admission control decisions
-- `gateway.backend.proxy`: Backend call with trace context injection
+- `gateway.request`: Top-level request span with request metadata (SERVER span)
+- `gateway.director.handle_request`: Admission control decisions (INTERNAL span)
+- `gateway.scheduler.schedule`: Pod selection with filter/scorer details (INTERNAL span)
+
+**Trace Context Propagation:**
+- W3C trace context (traceparent, tracestate) injected into HTTP headers when proxying to vLLM backends
+- Enables end-to-end distributed tracing across gateway and vLLM components
 
 **Critical Attributes:**
-- Request: model, size, pool name/namespace, streaming
-- Scheduler: policy, candidate count, selected pod, scores
-- Admission: result (admitted/rejected/queued), queue size
+- Request: model name, request size, streaming mode, token counts
+- Director: candidate pods, admission priority, result (admitted/rejected), target pod
+- Scheduler: candidate count, request ID, scheduling result, selected pod name/namespace
 
 #### **KV Cache Manager**
 
@@ -184,19 +187,24 @@ Minimal instrumentation recommended given deprecation plans. Basic `pd_proxy.req
 
 #### **vLLM Instances**
 
-**Current Status:** Tracer initialized, one span (`llm_request` at completion)
+**Current Status:** Production-ready tracing already implemented with comprehensive request-level observability.
 
-**Key Spans:**
-- `vllm.engine.request`: Enhanced with full lifecycle tracking
-- `vllm.scheduler.schedule`: Batch scheduling, KV cache allocation, admission
-- `vllm.executor.execute_model`: Model execution timing
-- `vllm.output.process_batch`: Output processing and detokenization
+**Key Span:**
+- `llm_request`: Full request lifecycle from arrival to completion (SERVER span)
+  - Created at request completion in OutputProcessor
+  - Extracts and continues trace context from incoming HTTP headers
+  - Captures complete latency breakdown and usage metrics
 
 **Critical Attributes:**
-- Latency: TTFT, queue time, prefill/decode time, e2e latency
+- Latency: TTFT (time to first token), E2E latency, queue time, prefill time, decode time, inference time
 - Usage: prompt tokens, completion tokens
-- Execution: batch size, phase (prefill/decode/mixed), KV cache metrics
-- Request params: temperature, top_p, max_tokens
+- Request params: model, temperature, top_p, max_tokens, n (number of completions)
+- Request ID for correlation
+
+**Trace Context Support:**
+- Automatically extracts W3C trace context (traceparent, tracestate) from HTTP request headers
+- Continues traces initiated by upstream components (e.g., gateway)
+- Creates new traces for requests without incoming trace context
 
 ### Enabling Distributed Tracing
 
@@ -232,14 +240,19 @@ vllm_config.observability_config.otlp_traces_endpoint = "http://otel-collector:4
 
 ### Trace Context Propagation
 
-Gateway must inject trace context into HTTP headers when proxying to vLLM:
+The gateway injects W3C trace context into HTTP headers when proxying requests to vLLM backends:
 
 ```go
-// In gateway when making HTTP request to vLLM
-otel.GetTextMapPropagator().Inject(ctx, propagation.HeaderCarrier(req.Header))
+// In gateway request handler (generateHeaders function)
+traceHeaders := make(map[string]string)
+propagator := otel.GetTextMapPropagator()
+propagator.Inject(ctx, propagation.MapCarrier(traceHeaders))
+
+// Headers include: traceparent, tracestate
+// These are added to the HTTP request forwarded to vLLM
 ```
 
-vLLM extracts trace context from headers (already implemented). This creates parent-child relationships across components.
+vLLM automatically extracts trace context from incoming HTTP headers (already implemented). This creates parent-child span relationships across components, enabling end-to-end distributed tracing from gateway through vLLM.
 
 ### Semantic Conventions and Attributes
 
@@ -272,9 +285,9 @@ vLLM extracts trace context from headers (already implemented). This creates par
 - Error states, KV cache hit ratios, component communication patterns
 
 **What is Excluded:**
-- ❌ Request payloads (prompts, inputs, messages)
-- ❌ Response content (generated text, completions)
-- ❌ Actual tokens or token IDs
+- Request payloads (prompts, inputs, messages)
+- Response content (generated text, completions)
+- Actual tokens or token IDs
 
 ### Security Benefits of Manual Instrumentation
 
@@ -285,15 +298,15 @@ vLLM extracts trace context from headers (already implemented). This creates par
 ### Implementation
 
 ```go
-// ✅ SAFE: Metadata only
+// SAFE: Metadata only
 span.SetAttributes(
     attribute.Int("gen_ai.usage.prompt_tokens", len(tokens)),
     attribute.String("gen_ai.request.model", "llama-2-70b"),
 )
 
-// ❌ NEVER DO THIS
+// NEVER DO THIS - FORBIDDEN
 span.SetAttributes(
-    attribute.String("request.prompt", userPrompt),  // FORBIDDEN
+    attribute.String("request.prompt", userPrompt),  // Exposes sensitive data
 )
 ```
 
@@ -304,32 +317,35 @@ span.SetAttributes(
 
 ## Implementation Phases
 
-### Phase 1: Core Request Lifecycle (High Priority)
+### Phase 1: Core Request Lifecycle (Completed)
 
-**Gateway:**
-- `gateway.request`, `gateway.scheduler.schedule`, `gateway.director.handle_request`
-- `gateway.backend.proxy` with trace context injection
-
-**vLLM:**
-- Enhance existing `vllm.engine.request` span
-- Add `vllm.scheduler.schedule`, `vllm.executor.execute_model`
-
-**Deliverable:** End-to-end traces with basic latency breakdown
-
-### Phase 2: Detailed Observability (Medium Priority)
-
-**Gateway:**
-- Scheduler child spans (filters, scorers, pickers)
-- Response processing spans
+**Gateway (gateway-api-inference-extension):**
+- `gateway.request` - Top-level request span with model, size, streaming, token counts
+- `gateway.director.handle_request` - Admission control with candidate pods, priority, result
+- `gateway.scheduler.schedule` - Scheduling decisions with candidate count, selected pod
+- Trace context injection in HTTP headers to vLLM backends (traceparent, tracestate)
 
 **vLLM:**
-- Scheduler children (admission, allocation, batching)
-- Output processing spans
+- `llm_request` - Full lifecycle span with TTFT, E2E latency, queue time, prefill/decode breakdown, token counts, request parameters
+- Trace context extraction from HTTP headers (already implemented)
 
-**Deliverable:** Decision visibility and KV cache tracking
+**KV Cache Manager:**
+- `kvcache.manager.get_scores` - Main scoring operation with model, pod count, hit ratio
+- `kvcache.storage.lookup` - Storage backend lookup (INTERNAL span)
+- `kvcache.scorer.compute` - Scoring algorithm execution (INTERNAL span)
 
-### Phase 3: Advanced Features (Lower Priority)
+**Status:** Implemented and documented. End-to-end distributed tracing functional across gateway, vLLM, and KV cache manager.
 
-- Flow control spans (if feature enabled)
-- KV cache manager instrumentation
-- Fine-grained vLLM worker/model spans
+### Phase 2: Detailed Observability (Future)
+
+**Gateway:**
+- Scheduler child spans (filters, scorers, pickers) for detailed scheduling decision visibility
+- Response processing spans for streaming response handling
+
+**Deliverable:** Enhanced decision visibility and response processing metrics
+
+### Phase 3: Advanced Features (Future)
+
+- Flow control spans (queue management, fairness)
+- Fine-grained vLLM internal spans (worker communication, model execution steps)
+- P/D disaggregation spans (prefill/decode coordination)
