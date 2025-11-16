@@ -254,6 +254,100 @@ propagator.Inject(ctx, propagation.MapCarrier(traceHeaders))
 
 vLLM automatically extracts trace context from incoming HTTP headers (already implemented). This creates parent-child span relationships across components, enabling end-to-end distributed tracing from gateway through vLLM.
 
+### Example Distributed Trace
+
+The following shows a complete distributed trace for an inference request flowing through the llm-d stack:
+
+```
+Trace ID: 4bf92f3577b34da6a3ce929d0e0e4736
+Total Duration: 2150ms
+
+gateway.request (2150ms) [SERVER]
+├── Span ID: 00f067aa0ba902b7
+├── Attributes:
+│   ├── gen_ai.request.model: "llama-2-7b-chat"
+│   ├── gateway.target_model: "llama-2-7b-chat"
+│   ├── gateway.request.size_bytes: 1024
+│   ├── gateway.response.streaming: true
+│   ├── gen_ai.usage.prompt_tokens: 128
+│   └── gen_ai.usage.completion_tokens: 512
+│
+├── gateway.director.handle_request (45ms) [INTERNAL]
+│   ├── Span ID: b7ad6b7169203331
+│   ├── Parent: 00f067aa0ba902b7
+│   ├── Attributes:
+│   │   ├── gateway.admission.candidate_pods: 3
+│   │   ├── gateway.admission.priority: 100
+│   │   ├── gateway.admission.result: "admitted"
+│   │   └── gateway.target_pod.name: "vllm-pod-1"
+│   │
+│   └── gateway.scheduler.schedule (38ms) [INTERNAL]
+│       ├── Span ID: 3fb7a1d9928de634
+│       ├── Parent: b7ad6b7169203331
+│       └── Attributes:
+│           ├── gateway.scheduler.candidate_pods: 3
+│           ├── gateway.request.id: "req-12345"
+│           ├── gateway.scheduler.result: "scheduled"
+│           ├── gateway.target_pod.name: "vllm-pod-1"
+│           └── gateway.target_pod.namespace: "default"
+│
+└── [HTTP Request to vLLM with trace headers]
+    │   traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+    │   tracestate: ...
+    ↓
+    llm_request (2100ms) [SERVER - in vLLM pod]
+    ├── Span ID: 8e3c1e2a4d6f5b9c
+    ├── Parent: 00f067aa0ba902b7 (gateway.request)
+    └── Attributes:
+        ├── gen_ai.request.id: "req-12345"
+        ├── gen_ai.request.model: "llama-2-7b-chat"
+        ├── gen_ai.request.temperature: 0.7
+        ├── gen_ai.request.top_p: 0.9
+        ├── gen_ai.request.max_tokens: 512
+        ├── gen_ai.usage.prompt_tokens: 128
+        ├── gen_ai.usage.completion_tokens: 512
+        ├── gen_ai.latency.time_to_first_token: 0.045s
+        ├── gen_ai.latency.e2e: 2.100s
+        ├── gen_ai.latency.time_in_queue: 0.012s
+        ├── gen_ai.latency.time_in_model_prefill: 0.033s
+        ├── gen_ai.latency.time_in_model_decode: 2.055s
+        └── gen_ai.latency.time_in_model_inference: 2.088s
+```
+
+**With KV Cache Manager (optional):**
+
+If the scheduler uses KV cache awareness for pod selection, additional spans appear:
+
+```
+gateway.scheduler.schedule (38ms) [INTERNAL]
+├── [calls KV Cache Manager for scores]
+│
+└── kvcache.manager.get_scores (15ms) [SERVER - in KV Cache Manager]
+    ├── Span ID: 7c2b5a8f3e1d9042
+    ├── Attributes:
+    │   ├── gen_ai.request.model: "llama-2-7b-chat"
+    │   ├── kvcache.pod_count: 3
+    │   ├── kvcache.hit_ratio: 0.65
+    │   └── kvcache.total_blocks_available: 1024
+    │
+    ├── kvcache.storage.lookup (8ms) [INTERNAL]
+    │   ├── Span ID: 4f8e2c1a6d3b9057
+    │   └── Parent: 7c2b5a8f3e1d9042
+    │
+    └── kvcache.scorer.compute (5ms) [INTERNAL]
+        ├── Span ID: 9a3d7f5b2e8c1046
+        └── Parent: 7c2b5a8f3e1d9042
+```
+
+**Key Observations:**
+
+1. **Parent-Child Relationships**: Each span references its parent via Span ID, creating a hierarchical trace
+2. **Trace ID Propagation**: Same Trace ID (`4bf92f3577b34da6a3ce929d0e0e4736`) flows across all components
+3. **Timing Analysis**: Gateway overhead is ~50ms, vLLM processing is 2100ms (97% of total time)
+4. **Decision Visibility**: Can see exactly which pod was selected and why (admission priority, scheduling result)
+5. **Performance Breakdown**: vLLM span shows TTFT (45ms), queue time (12ms), prefill (33ms), decode (2055ms)
+6. **Cross-Component Correlation**: Request ID allows correlation across all spans
+
 ### Semantic Conventions and Attributes
 
 **OpenTelemetry GenAI Conventions:**
