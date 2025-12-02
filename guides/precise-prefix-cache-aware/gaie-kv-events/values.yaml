@@ -9,8 +9,10 @@ inferenceExtension:
     # both downstream infernece-scheduler and upstream epp images can support precise KV Cache awareness based on the configurations here
     ###################
     name: llm-d-inference-scheduler
-    hub: ghcr.io/llm-d
-    tag: v0.4.0
+    #hub: ghcr.io/llm-d
+    #tag: v0.4.0
+    hub: quay.io/sallyom
+    tag: tracing
     ###################
     # name: epp
     # hub: registry.k8s.io/gateway-api-inference-extension
@@ -78,6 +80,17 @@ inferenceExtension:
       auth:
         # To allow unauthenticated /metrics access (e.g., for debugging with curl), set to false
         enabled: true
+
+  # OpenTelemetry distributed tracing configuration
+  tracing:
+    enabled: true
+    # OTLP endpoint for trace export
+    otelExporterEndpoint: "http://llm-d-collector-collector.monitoring.svc.cluster.local:4317"
+    sampling:
+      # Parent-based sampling with 100% trace ratio
+      sampler: "parentbased_traceidratio"
+      samplerArg: "1.0"
+
 inferencePool:
   targetPorts:
     - number: 8000

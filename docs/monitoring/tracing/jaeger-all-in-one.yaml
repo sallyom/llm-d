@@ -1,0 +1,83 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: jaeger
+  labels:
+    app: jaeger
+spec:
+  type: ClusterIP
+  ports:
+    - name: jaeger-query
+      port: 16686
+      targetPort: 16686
+      protocol: TCP
+    - name: jaeger-collector-grpc
+      port: 14250
+      targetPort: 14250
+      protocol: TCP
+    - name: jaeger-collector-http
+      port: 14268
+      targetPort: 14268
+      protocol: TCP
+    - name: jaeger-otlp-grpc
+      port: 4317
+      targetPort: 4317
+      protocol: TCP
+    - name: jaeger-otlp-http
+      port: 4318
+      targetPort: 4318
+      protocol: TCP
+  selector:
+    app: jaeger
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jaeger
+  labels:
+    app: jaeger
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: jaeger
+  template:
+    metadata:
+      labels:
+        app: jaeger
+    spec:
+      containers:
+      - name: jaeger
+        image: cr.jaegertracing.io/jaegertracing/jaeger:2.11.0
+        # Jaeger v2 uses default configuration for all-in-one mode
+        # OTLP receivers and in-memory storage are enabled by default
+        # For production, use a config file with --config flag
+        ports:
+        - name: query
+          containerPort: 16686
+          protocol: TCP
+        - name: collector-grpc
+          containerPort: 14250
+          protocol: TCP
+        - name: collector-http
+          containerPort: 14268
+          protocol: TCP
+        - name: otlp-grpc
+          containerPort: 4317
+          protocol: TCP
+        - name: otlp-http
+          containerPort: 4318
+          protocol: TCP
+        - name: zipkin
+          containerPort: 9411
+          protocol: TCP
+        - name: admin
+          containerPort: 14269
+          protocol: TCP
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
