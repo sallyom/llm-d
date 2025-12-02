@@ -181,13 +181,23 @@ with self.tracer.start_as_current_span("vllm.scheduler.schedule") as span:
 **Critical Attributes:**
 - Model identifier, pod count, cache hit ratio, blocks available
 
-#### **P/D Proxy (Transitional)**
+#### **P/D Sidecar (llm-d-inference-scheduler/pkg/sidecar)**
 
-Minimal instrumentation recommended given deprecation plans. Basic `pd_proxy.request` span with disaggregation metadata only.
+Located in llm-d-inference-scheduler repository under `pkg/sidecar/proxy/` with entrypoint `cmd/pd-sidecar/main.go`.
+
+**Key Spans:**
+- `pd_sidecar.request`: Top-level request span for P/D disaggregated requests (SERVER span)
+- `pd_sidecar.prefill`: Prefill stage processing (INTERNAL span)
+- `pd_sidecar.decode`: Decode stage processing (INTERNAL span)
+
+**Critical Attributes:**
+- Request ID, connector type (nixlv2, lmcache, sglang), prefill target host
+- Stage timings (prefill duration, decode duration), streaming mode
+- Data parallel routing information
 
 #### **vLLM Instances**
 
-**Current Status:** Production-ready tracing already implemented with comprehensive request-level observability.
+**Current Status:** Tracing already implemented with request-level observability.
 
 **Key Span:**
 - `llm_request`: Full request lifecycle from arrival to completion (SERVER span)
@@ -428,7 +438,10 @@ span.SetAttributes(
 - `kvcache.storage.lookup` - Storage backend lookup (INTERNAL span)
 - `kvcache.scorer.compute` - Scoring algorithm execution (INTERNAL span)
 
-**Status:** Implemented and documented. End-to-end distributed tracing functional across gateway, vLLM, and KV cache manager.
+**P/D Sidecar:**
+- `pd_sidecar.request` - Top-level request span with connector type, request ID, target hosts
+- `pd_sidecar.prefill` - Prefill stage with prefill target, duration
+- `pd_sidecar.decode` - Decode stage with streaming mode, data parallel routing
 
 ### Phase 2: Detailed Observability (Future)
 
