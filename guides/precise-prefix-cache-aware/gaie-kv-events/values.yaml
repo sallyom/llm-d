@@ -4,8 +4,10 @@ inferenceExtension:
     # both downstream infernece-scheduler and upstream epp images can support precise KV Cache awareness based on the configurations here
     ###################
     name: llm-d-inference-scheduler
-    hub: ghcr.io/llm-d
-    tag: v0.4.0-rc.1
+    #hub: ghcr.io/llm-d
+    #tag: v0.4.0-rc.1
+    hub: quay.io/sallyom
+    tag: tracing
     ###################
     # name: epp
     # hub: registry.k8s.io/gateway-api-inference-extension
@@ -32,8 +34,7 @@ inferenceExtension:
           key: HF_TOKEN
   flags:
     # Log verbosity
-    - name: v
-      value: 4
+    v: 4
   
   pluginsConfigFile: "precise-prefix-cache-config.yaml"
   pluginsCustomConfig:
@@ -66,12 +67,25 @@ inferenceExtension:
   monitoring:
     interval: "10s"
     # Service account token secret for authentication
-    secret:
-      name: prefix-routing-gateway-sa-metrics-reader-secret
+    #secret:
+    #  name: prefix-routing-gateway-sa-metrics-reader-secret
 
     # Prometheus ServiceMonitor will be created when enabled for EPP metrics collection
     prometheus:
       enabled: true
+      auth:
+        enabled: false
+
+  # OpenTelemetry distributed tracing configuration
+  tracing:
+    enabled: true
+    # OTLP endpoint for trace export
+    otelExporterEndpoint: "http://llm-d-collector-collector.monitoring.svc.cluster.local:4317"
+    sampling:
+      # Parent-based sampling with 100% trace ratio
+      sampler: "parentbased_traceidratio"
+      samplerArg: "1.0"
+
 inferencePool:
   apiVersion: inference.networking.x-k8s.io/v1alpha2 # use old API version for inference
   targetPortNumber: 8000

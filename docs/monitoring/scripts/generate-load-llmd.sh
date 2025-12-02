@@ -173,8 +173,10 @@ prompts=(
 )
 
 # Error types to cycle through
+# NOTE: "invalid_model" is commented out because it causes hangs with
+# precise-prefix-cache-scorer plugin (tries to download non-existent tokenizer)
 error_types=(
-    "invalid_model"
+    # "invalid_model"
     "malformed_json"
     "missing_required_field"
     "invalid_temperature"

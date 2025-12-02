@@ -1,0 +1,75 @@
+apiVersion: opentelemetry.io/v1beta1
+kind: OpenTelemetryCollector
+metadata:
+  name: llm-d-collector
+spec:
+  mode: deployment
+  config:
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+
+    processors:
+      # Filter to DROP metrics scraping spans
+      # This is mandatory, otherwise a span is generated every few ms
+      filter/drop-metrics:
+        error_mode: ignore
+        traces:
+          span:
+            # Drop any span with url.path = /metrics
+            - 'attributes["url.path"] == "/metrics"'
+            # Also drop spans named "GET /metrics"
+            - 'name == "GET /metrics"'
+
+      # Batch processor to improve performance
+      batch:
+        timeout: 1s
+        send_batch_size: 1024
+        send_batch_max_size: 2048
+
+    exporters:
+      # Tempo exporter (only need 1 or other, Tempo or Jaeger)
+      otlp/tempo:
+        endpoint: tempo.monitoring.svc.cluster.local:4317
+        tls:
+          insecure: true
+
+      # Jaeger exporter (only need 1 or other, Tempo or Jaeger)
+      otlp/jaeger:
+        endpoint: jaeger.monitoring.svc.cluster.local:4317
+        tls:
+          insecure: true
+
+      # Debug exporter for troubleshooting (optional - can remove after testing)
+      debug:
+        verbosity: basic
+        sampling_initial: 10
+        sampling_thereafter: 100
+
+    service:
+      pipelines:
+        traces:
+          receivers:
+            - otlp
+          processors:
+            - filter/drop-metrics  # Filter BEFORE batching
+            - batch
+          exporters:
+            # - otlp/tempo    # Export to Tempo (disabled)
+            - otlp/jaeger   # Export to Jaeger
+            # - debug       # Optional: Remove after testing
+
+      telemetry:
+        logs:
+          level: info  # Changed from debug to reduce noise
+        metrics:
+          readers:
+            - pull:
+                exporter:
+                  prometheus:
+                    host: 0.0.0.0
+                    port: 8888
