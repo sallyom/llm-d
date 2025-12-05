@@ -9,8 +9,8 @@ modelArtifacts:
 routing:
   servicePort: 8000
   proxy:
-    image: ghcr.io/llm-d/llm-d-routing-sidecar:v0.4.0-rc.1
-    #image: quay.io/sallyom/llm-d-routing-sidecar:tracing
+    #image: ghcr.io/llm-d/llm-d-routing-sidecar:v0.4.0-rc.1
+    image: quay.io/sallyom/llm-d-routing-sidecar:tracing
     connector: nixlv2
     secure: false
     # OpenTelemetry distributed tracing configuration for P/D sidecar
@@ -19,7 +19,7 @@ routing:
       - name: OTEL_SERVICE_NAME
         value: "pd-sidecar"
       - name: OTEL_EXPORTER_OTLP_ENDPOINT
-        value: "http://llm-d-collector-collector.monitoring.svc.cluster.local:4317"
+        value: "http://llm-d-collector-collector.observability-hub.svc.cluster.local:4317"
       - name: OTEL_TRACES_EXPORTER
         value: "otlp"
       - name: OTEL_TRACES_SAMPLER
@@ -72,7 +72,7 @@ decode:
         --prefix-caching-hash-algo sha256_cbor \
         --kv-transfer-config '{"kv_connector":"NixlConnector", "kv_role":"kv_both"}' \
         --kv-events-config "{\"enable_kv_cache_events\":true,\"publisher\":\"zmq\",\"endpoint\":\"tcp://gaie-${GAIE_RELEASE_NAME_POSTFIX}-epp.${NAMESPACE}.svc.cluster.local:5557\",\"topic\":\"kv@${POD_IP}@Qwen/Qwen3-0.6B\"}" \
-        --otlp-traces-endpoint "http://llm-d-collector-collector.monitoring.svc.cluster.local:4317"
+        --otlp-traces-endpoint "http://llm-d-collector-collector.observability-hub.svc.cluster.local:4317"
     env:
       - name: GAIE_RELEASE_NAME_POSTFIX # index 0 matters because of set in helmfile
       - name: OTEL_SERVICE_NAME
