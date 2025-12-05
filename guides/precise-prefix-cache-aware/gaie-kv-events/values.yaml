@@ -85,7 +85,7 @@ inferenceExtension:
   tracing:
     enabled: true
     # OTLP endpoint for trace export
-    otelExporterEndpoint: "http://llm-d-collector-collector.monitoring.svc.cluster.local:4317"
+    otelExporterEndpoint: "http://llm-d-collector-collector.observability-hub.svc.cluster.local:4317"
     sampling:
       # Parent-based sampling with 100% trace ratio
       sampler: "parentbased_traceidratio"

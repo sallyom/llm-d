@@ -9,7 +9,7 @@ validation across the llm-d stack through explicit, custom spans at critical dec
 ## Motivation
 
 LLM inference workloads present unique observability challenges due to their expensive, non-uniform, and often slow request patterns. In distributed
-systems like llm-d, understanding request flow across components like the inference scheduler, KV cache manager, and vLLM instances becomes critical
+systems like llm-d, understanding request flow across components like the inference scheduler, KV cache manager, and vLLM instances is required
 for operationalizing inference at scale.
 
 Current monitoring approaches lack the granular, request-level visibility needed to optimize Time to First Token (TTFT), Inter-Token Latency (ITL),
@@ -47,7 +47,7 @@ routing and disaggregated serving.
 ## Proposal
 
 This proposal introduces distributed tracing across the llm-d stack using **manual OpenTelemetry instrumentation**.
-Each component will explicitly initialize tracers and create custom spans around critical operations—scheduling decisions,
+Each component will explicitly initialize tracers and create custom spans around key operations—scheduling decisions,
 cache lookups, model execution—to provide deep, end-to-end observability with precise control over traced operations and attributes.
 
 ### User Stories
@@ -127,7 +127,7 @@ Sampling decision is made at trace entry (gateway) and propagated to all compone
 ## Implementation Approach
 
 The implementation uses **manual OpenTelemetry instrumentation** across llm-d components. Each component explicitly
-initializes its tracer and creates custom spans around critical operations.
+initializes its tracer and creates custom spans.
 
 **Current Status:**
 - **Gateway (GAIE)**: Tracing implemented in working branch `release-1.2-tracing`
@@ -181,7 +181,8 @@ with self.tracer.start_as_current_span("vllm.scheduler.schedule") as span:
 
 **Additional Proposed Spans (llm-d-inference-scheduler plugins):**
 - `llm_d.epp.startup`: Pod startup span (added in `cmd/epp/main.go`)
-  - Attributes: component, operation, outcome
+  - Attributes: component, operation
+  - Status tracking: Sets span status to Error on startup failures, Ok on success
 
 - `llm_d.epp.scorer.prefix_cache`: Precise prefix cache scoring (added in `pkg/plugins/scorer/precise_prefix_cache.go`)
   - Attributes: candidate pods, model, request ID, scores computed, score distribution (max, avg), pods scored
@@ -192,17 +193,18 @@ with self.tracer.start_as_current_span("vllm.scheduler.schedule") as span:
 #### **KV Cache Manager**
 
 **Proposed Spans:**
-- `kvcache.manager.get_scores`: Main scoring operation (SERVER span)
+- `llm_d.kv_cache_manager.get_scores`: Main scoring operation (SERVER span)
   - Added in: `pkg/kvcache/indexer.go` (GetPodScores method)
-  - Attributes: model name, pod count, block keys count, total blocks available, hit ratio, pods with hits
+  - Attributes: model name, pod count, considered pods list, block keys count, total blocks available, hit ratio, pods with hits count, pods with hits list
   - Error tracking: Records errors from tokenization, lookup, or scoring failures
+  - Pod tracking: Records all considered pods and which pods had cache hits
 
-- `kvcache.storage.lookup`: Storage backend lookup (INTERNAL span)
+- `llm_d.kv_cache_manager.storage.lookup`: Storage backend lookup (INTERNAL span)
   - Added in: `pkg/kvcache/indexer.go` (lookupWithSpan wrapper)
   - Attributes: block count, pod filter count, cache hit flag, blocks found
   - Error tracking: Records errors from Redis/Valkey lookup failures
 
-- `kvcache.scorer.compute`: Scoring algorithm execution (INTERNAL span)
+- `llm_d.kv_cache_manager.scorer.compute`: Scoring algorithm execution (INTERNAL span)
   - Added in: `pkg/kvcache/indexer.go` (scoreWithSpan wrapper)
   - Attributes: scoring algorithm/strategy, key count, score distribution (max, avg), pods scored
   - Error tracking: Records errors from scoring computation
@@ -211,34 +213,55 @@ with self.tracer.start_as_current_span("vllm.scheduler.schedule") as span:
 - All three spans form a parent-child relationship during pod scoring
 - Spans are only created when precise-prefix-cache-scorer plugin is enabled and invoked
 - Hit ratio calculation: `pods_with_hits / total_pods` provides cache effectiveness metric
+- Pod tracking uses OpenTelemetry's StringSlice attribute type to record lists of pods
 
-#### **P/D Sidecar (llm-d-inference-scheduler/pkg/sidecar)**
+#### **P/D Proxy (llm-d-inference-scheduler/pkg/sidecar)**
 
 Located in llm-d-inference-scheduler repository under `pkg/sidecar/proxy/` with entrypoint `cmd/pd-sidecar/main.go`.
 
 **Proposed Spans:**
-- `pd_sidecar.request`: Top-level request span for all requests through sidecar (SERVER span)
+- `llm_d.pd_proxy.request`: Top-level request span for all requests through proxy (SERVER span)
   - Added in: `pkg/sidecar/proxy/chat_completions.go` (chatCompletionsHandler)
   - Attributes: connector type (nixlv2, lmcache, sglang), request path, disaggregation enabled flag, prefill target, prefill candidates count
   - Conditional attributes: SSRF protection errors, reason for skipping disaggregation
   - Error tracking: Records SSRF protection denials
+  - **End-to-End P/D Metrics** (added to solve TTFT/TPOT measurement issues in P/D mode):
+    - `llm_d.pd_proxy.total_duration_ms`: Total request duration from sidecar entry to completion (ms)
+    - `llm_d.pd_proxy.true_ttft_ms`: True Time to First Token from client perspective (includes prefill + coordination overhead)
+    - `llm_d.pd_proxy.prefill_duration_ms`: Prefill stage duration (ms)
+    - `llm_d.pd_proxy.decode_duration_ms`: Decode stage duration (ms)
+    - `llm_d.pd_proxy.kv_transfer_overhead_ms`: Coordination overhead between prefill and decode stages (ms)
+    - `llm_d.pd_proxy.concurrent_pd`: Boolean flag (SGLang only) indicating concurrent prefill/decode execution
 
-- `pd_sidecar.prefill`: Prefill stage processing (INTERNAL span)
+- `llm_d.pd_proxy.prefill`: Prefill stage processing (INTERNAL span)
   - Added in: `pkg/sidecar/proxy/connector_nixlv2.go` (and other connector files)
   - Attributes: request ID, prefill target host:port, connector type, prefill HTTP status code, prefill duration (ms)
   - Error tracking: Records prefill request failures with status codes
 
-- `pd_sidecar.decode`: Decode stage processing (INTERNAL span)
+- `llm_d.pd_proxy.decode`: Decode stage processing (INTERNAL span)
   - Added in: `pkg/sidecar/proxy/connector_nixlv2.go` (and other connector files)
   - Attributes: request ID, connector type, streaming enabled flag, data parallel routing flag, decode target host, decode duration (ms)
   - Tracks whether data parallel routing was used
 
 **Implementation Notes:**
-- `pd_sidecar.request` span is created for ALL requests, even when disaggregation is not active
-- `pd_sidecar.prefill` and `pd_sidecar.decode` spans are only created when P/D disaggregation is active
+- `llm_d.pd_proxy.request` span is created for ALL requests, even when disaggregation is not active
+- `llm_d.pd_proxy.prefill` and `llm_d.pd_proxy.decode` spans are only created when P/D disaggregation is active
 - When disaggregation is inactive, attributes explain why (e.g., "no_prefill_header")
 - Duration tracking uses milliseconds for prefill and decode stages
 - Connector-specific implementations in: `connector_nixlv2.go`, `connector_lmcache.go`, `connector_sglang.go`
+
+**P/D Metrics Rationale:**
+The end-to-end P/D metrics address an observability gap: vLLM instances in P/D mode report TTFT and TPOT from their local perspective, not the client's end-to-end view. Specifically:
+- **Prefiller instance** reports TTFT that doesn't include KV cache transfer time
+- **Decoder instance** reports artificially low TTFT (KV cache already transferred)
+- **Neither instance** captures the true end-to-end latency experienced by the client
+
+The sidecar, acting as the P/D coordinator, has visibility into both stages and can calculate the "true" metrics:
+- `true_ttft_ms`: Time from request arrival to when decoder can start generating (prefill + coordination)
+- `total_duration_ms`: Complete request latency from sidecar entry to response completion
+- `kv_transfer_overhead_ms`: Coordination overhead between prefill completion and decode start
+
+These coordinator-level metrics should be used instead of per-instance vLLM metrics for accurate P/D performance analysis.
 
 #### **vLLM Instances**
 
@@ -303,7 +326,7 @@ func InitTracing(ctx context.Context) (func(context.Context) error, error) {
 // Access tracer via: telemetry.Tracer()
 ```
 
-**P/D Sidecar (Go):**
+**P/D Proxy (Go):**
 ```go
 // Uses same telemetry package as Gateway/EPP
 // Proposed in: github.com/llm-d/llm-d-inference-scheduler/pkg/telemetry
@@ -323,8 +346,8 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
 OTEL_TRACES_SAMPLER=parentbased_traceidratio
 OTEL_TRACES_SAMPLER_ARG=0.1  # 10% sampling for production
 
-# P/D Sidecar
-OTEL_SERVICE_NAME=pd-sidecar
+# P/D Proxy
+OTEL_SERVICE_NAME=llm-d-pd-proxy
 OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
 OTEL_TRACES_SAMPLER=parentbased_traceidratio
 OTEL_TRACES_SAMPLER_ARG=0.1
@@ -404,7 +427,7 @@ gateway.request (2150ms) [SERVER - service: gateway-api-inference-extension]
 │       │   │   ├── llm_d.scorer.score.avg: 0.62
 │       │   │   └── llm_d.scorer.pods_scored: 3
 │       │   │
-│       │   └── [Calls KV Cache Manager via gRPC]
+│       │   └── [Calls KV Cache Manager GetPodScores RPC]
 │       │
 │       └── llm_d.epp.prerequest.pd_disaggregation (2ms) [INTERNAL]
 │           ├── Span ID: 9c4a6f2e8b5d1037
@@ -416,29 +439,36 @@ gateway.request (2150ms) [SERVER - service: gateway-api-inference-extension]
 │               ├── llm_d.epp.pd.prefill_pod_address: "10.244.0.14"
 │               └── llm_d.epp.pd.prefill_pod_port: "8200"
 │
-└── [HTTP Request to P/D Sidecar with trace + prefill headers]
+└── [HTTP Request to P/D Proxy with trace + prefill headers]
     │   traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
     │   X-Prefill-Pod: 10.244.0.14:8200
     ↓
-    pd_sidecar.request (2105ms) [SERVER - service: pd-sidecar]
+    llm_d.pd_proxy.request (2105ms) [SERVER - service: llm-d-pd-proxy]
     ├── Span ID: 7d8e9f3a1c2b4056
     ├── Parent: 00f067aa0ba902b7 (gateway.request)
     ├── Attributes:
-    │   ├── pd_sidecar.connector: "nixlv2"
-    │   ├── pd_sidecar.request.path: "/v1/chat/completions"
-    │   ├── pd_sidecar.disaggregation_enabled: true
-    │   ├── pd_sidecar.prefill_target: "10.244.0.14:8200"
-    │   └── pd_sidecar.prefill_candidates: 2
+    │   ├── llm_d.pd_proxy.connector: "nixlv2"
+    │   ├── llm_d.pd_proxy.request.path: "/v1/chat/completions"
+    │   ├── llm_d.pd_proxy.disaggregation_enabled: true
+    │   ├── llm_d.pd_proxy.prefill_target: "10.244.0.14:8200"
+    │   ├── llm_d.pd_proxy.prefill_candidates: 2
+    │   │
+    │   │   **End-to-End P/D Metrics (Coordinator View):**
+    │   ├── llm_d.pd_proxy.total_duration_ms: 2105.0
+    │   ├── llm_d.pd_proxy.true_ttft_ms: 55.0
+    │   ├── llm_d.pd_proxy.prefill_duration_ms: 55.0
+    │   ├── llm_d.pd_proxy.decode_duration_ms: 2050.0
+    │   └── llm_d.pd_proxy.kv_transfer_overhead_ms: 0.5
     │
-    ├── pd_sidecar.prefill (55ms) [INTERNAL]
+    ├── llm_d.pd_proxy.prefill (55ms) [INTERNAL]
     │   ├── Span ID: 2f3e4a5b6c7d8091
     │   ├── Parent: 7d8e9f3a1c2b4056
     │   ├── Attributes:
-    │   │   ├── pd_sidecar.request_id: "550e8400-e29b-41d4-a716-446655440000"
-    │   │   ├── pd_sidecar.prefill_target: "10.244.0.14:8200"
-    │   │   ├── pd_sidecar.connector: "nixlv2"
-    │   │   ├── pd_sidecar.prefill.status_code: 200
-    │   │   └── pd_sidecar.prefill.duration_ms: 55.0
+    │   │   ├── llm_d.pd_proxy.request_id: "550e8400-e29b-41d4-a716-446655440000"
+    │   │   ├── llm_d.pd_proxy.prefill_target: "10.244.0.14:8200"
+    │   │   ├── llm_d.pd_proxy.connector: "nixlv2"
+    │   │   ├── llm_d.pd_proxy.prefill.status_code: 200
+    │   │   └── llm_d.pd_proxy.prefill.duration_ms: 55.0
     │   │
     │   └── [HTTP Request to prefill vLLM pod]
     │       ↓
@@ -447,22 +477,22 @@ gateway.request (2150ms) [SERVER - service: gateway-api-inference-extension]
     │       ├── gen_ai.latency.time_in_model_prefill: 0.033s
     │       └── (KV cache blocks transferred to decode pod)
     │
-    └── pd_sidecar.decode (2050ms) [INTERNAL]
+    └── llm_d.pd_proxy.decode (2050ms) [INTERNAL]
         ├── Span ID: 8a9b0c1d2e3f4105
         ├── Parent: 7d8e9f3a1c2b4056
         ├── Attributes:
-        │   ├── pd_sidecar.request_id: "550e8400-e29b-41d4-a716-446655440000"
-        │   ├── pd_sidecar.connector: "nixlv2"
-        │   ├── pd_sidecar.decode.streaming: true
-        │   ├── pd_sidecar.decode.data_parallel: false
-        │   ├── pd_sidecar.decode.target: "localhost:8200"
-        │   └── pd_sidecar.decode.duration_ms: 2050.0
+        │   ├── llm_d.pd_proxy.request_id: "550e8400-e29b-41d4-a716-446655440000"
+        │   ├── llm_d.pd_proxy.connector: "nixlv2"
+        │   ├── llm_d.pd_proxy.decode.streaming: true
+        │   ├── llm_d.pd_proxy.decode.data_parallel: false
+        │   ├── llm_d.pd_proxy.decode.target: "localhost:8200"
+        │   └── llm_d.pd_proxy.decode.duration_ms: 2050.0
         │
         └── [HTTP Request to local decode vLLM]
             ↓
             llm_request (2045ms) [SERVER - service: vllm, pod: vllm-decode-pod-0]
             ├── Span ID: 8e3c1e2a4d6f5b9c
-            ├── Parent: 8a9b0c1d2e3f4105 (pd_sidecar.decode)
+            ├── Parent: 8a9b0c1d2e3f4105 (llm_d.pd_proxy.decode)
             └── Attributes:
                 ├── gen_ai.request.id: "550e8400-e29b-41d4-a716-446655440000"
                 ├── gen_ai.request.model: "Qwen/Qwen3-0.6B"
@@ -486,70 +516,38 @@ When the precise-prefix-cache-scorer plugin is invoked during scheduling, it cal
 llm_d.epp.scorer.prefix_cache (12ms) [INTERNAL]
 ├── [Calls KV Cache Manager GetPodScores RPC]
 │
-└── kvcache.manager.get_scores (10ms) [SERVER - service: kv-cache-manager]
+└── llm_d.kv_cache_manager.get_scores (10ms) [SERVER - service: kv-cache-manager]
     ├── Span ID: 7c2b5a8f3e1d9042
     ├── Parent: 5e7f9a2c8d1b3046 (llm_d.epp.scorer.prefix_cache)
     ├── Attributes:
     │   ├── gen_ai.request.model: "Qwen/Qwen3-0.6B"
-    │   ├── kvcache.pod_count: 3
-    │   ├── kvcache.block_keys.count: 16
-    │   ├── kvcache.total_blocks_available: 1024
-    │   ├── kvcache.hit_ratio: 0.67
-    │   └── kvcache.pods_with_hits: 2
+    │   ├── llm_d.kv_cache_manager.pod_count: 3
+    │   ├── llm_d.kv_cache_manager.considered_pods: ["10.244.0.13", "10.244.0.14", "10.244.0.15"]
+    │   ├── llm_d.kv_cache_manager.block_keys.count: 16
+    │   ├── llm_d.kv_cache_manager.total_blocks_available: 1024
+    │   ├── llm_d.kv_cache_manager.hit_ratio: 0.67
+    │   ├── llm_d.kv_cache_manager.pods_with_hits: 2
+    │   └── llm_d.kv_cache_manager.pods_with_hits_list: ["10.244.0.14", "10.244.0.15"]
     │
-    ├── kvcache.storage.lookup (6ms) [INTERNAL]
+    ├── llm_d.kv_cache_manager.storage.lookup (6ms) [INTERNAL]
     │   ├── Span ID: 4f8e2c1a6d3b9057
     │   ├── Parent: 7c2b5a8f3e1d9042
     │   └── Attributes:
-    │       ├── kvcache.lookup.block_count: 16
-    │       ├── kvcache.lookup.pod_filter_count: 3
-    │       ├── kvcache.lookup.cache_hit: true
-    │       └── kvcache.lookup.blocks_found: 11
+    │       ├── llm_d.kv_cache_manager.lookup.block_count: 16
+    │       ├── llm_d.kv_cache_manager.lookup.pod_filter_count: 3
+    │       ├── llm_d.kv_cache_manager.lookup.cache_hit: true
+    │       └── llm_d.kv_cache_manager.lookup.blocks_found: 11
     │
-    └── kvcache.scorer.compute (3ms) [INTERNAL]
+    └── llm_d.kv_cache_manager.scorer.compute (3ms) [INTERNAL]
         ├── Span ID: 9a3d7f5b2e8c1046
         ├── Parent: 7c2b5a8f3e1d9042
         └── Attributes:
-            ├── kvcache.scorer.algorithm: "hit_count"
-            ├── kvcache.scorer.key_count: 16
-            ├── kvcache.score.max: 11.0
-            ├── kvcache.score.avg: 7.3
-            └── kvcache.scorer.pods_scored: 3
+            ├── llm_d.kv_cache_manager.scorer.algorithm: "hit_count"
+            ├── llm_d.kv_cache_manager.scorer.key_count: 16
+            ├── llm_d.kv_cache_manager.score.max: 11.0
+            ├── llm_d.kv_cache_manager.score.avg: 7.3
+            └── llm_d.kv_cache_manager.scorer.pods_scored: 3
 ```
-
-**Key Observations:**
-
-1. **End-to-End Trace Coverage**: Single trace ID (`4bf92f3577b34da6a3ce929d0e0e4736`) flows across all components:
-   - Gateway API Inference Extension (request routing and scheduling)
-   - KV Cache Manager (cache-aware pod scoring)
-   - P/D Sidecar (prefill/decode disaggregation)
-   - vLLM instances (prefill and decode execution)
-
-2. **Parent-Child Relationships**: Each span references its parent via Span ID, creating a hierarchical trace tree that visualizes request flow
-
-3. **Component Timing Breakdown**:
-   - Gateway overhead: ~45ms (scheduling, admission control, cache scoring)
-   - P/D Sidecar prefill: 55ms (includes 50ms vLLM prefill + 5ms overhead)
-   - P/D Sidecar decode: 2050ms (includes 2045ms vLLM decode + 5ms overhead)
-   - Total: 2150ms
-
-4. **Decision Visibility**:
-   - Admission control: See which pods were candidates, priority, and admission result
-   - Scheduling: See prefix cache scores (max: 0.85, avg: 0.62) that influenced pod selection
-   - P/D Disaggregation: See prefill target selection and KV transfer coordination
-   - Cache effectiveness: Hit ratio of 0.67 (2 out of 3 pods had matching cache blocks)
-
-5. **Performance Insights**:
-   - TTFT improved from 45ms (non-P/D) to 15ms (P/D) due to transferred KV cache blocks
-   - Prefill isolated to dedicated pod (50ms), decode uses cached results (2045ms)
-   - Cache-aware routing selected pod with 11 matching blocks out of 16 total
-
-6. **Cross-Component Correlation**:
-   - Request ID (`req-12345`) flows through gateway and scoring plugins
-   - P/D request ID (UUID) correlates prefill and decode stages
-   - Service names differentiate between components in trace visualization
-
-7. **Error Tracking**: All spans record errors with `span.RecordError()` and set error status, enabling rapid failure diagnosis
 
 ### Semantic Conventions and Attributes
 
@@ -561,7 +559,11 @@ llm_d.epp.scorer.prefix_cache (12ms) [INTERNAL]
 **llm-d Custom Attributes:**
 - Namespace: `llm_d.*` or component-specific (`vllm.*`, `kvcache.*`)
 - Avoid high-cardinality attributes
-- Record errors: `span.RecordError(err)`, `span.SetStatus(codes.Error, msg)`
+
+- **Use span status for operation outcomes**:
+  - Success: `span.SetStatus(codes.Ok, "")`
+  - Failure: `span.RecordError(err)` + `span.SetStatus(codes.Error, "description")`
+- Span status is the standard way to represent operation success/failure and integrates with observability backends for filtering and alerting
 
 ## Alternatives Considered
 
@@ -611,56 +613,3 @@ span.SetAttributes(
 - Use TLS for OTLP export
 - Treat trace data as operationally sensitive
 - Configure appropriate retention policies
-
-## Implementation Phases
-
-### Phase 1: Core Request Lifecycle (Proposed - In PoC)
-
-This phase implements basic request tracing across all llm-d components with key decision points.
-
-**Gateway API Inference Extension (gateway-api-inference-extension):**
-- Working branch: `release-1.2-tracing`
-- Spans:
-  - `gateway.request` - Top-level request span with model, size, streaming, token counts
-  - `gateway.director.handle_request` - Admission control with candidate pods, priority, result
-  - `gateway.scheduler.schedule` - Scheduling decisions with candidate count, selected pod
-- Trace context injection in HTTP headers to downstream components (traceparent, tracestate)
-
-**llm-d-inference-scheduler (EPP plugins + P/D Sidecar):**
-- Working branch: `tracing`
-- EPP Spans:
-  - `llm_d.epp.startup` - Pod startup and initialization
-  - `llm_d.epp.scorer.prefix_cache` - Prefix cache scoring with score distribution
-  - `llm_d.epp.prerequest.pd_disaggregation` - P/D header setup
-- P/D Sidecar Spans:
-  - `pd_sidecar.request` - Top-level request span with connector type, disaggregation status
-  - `pd_sidecar.prefill` - Prefill stage with target, duration, status
-  - `pd_sidecar.decode` - Decode stage with streaming mode, data parallel routing, duration
-
-**KV Cache Manager:**
-- Working branch: `tracing`
-- Spans:
-  - `kvcache.manager.get_scores` - Main scoring with model, pod count, hit ratio
-  - `kvcache.storage.lookup` - Storage backend lookup with cache hit metrics
-  - `kvcache.scorer.compute` - Scoring algorithm with score distribution
-
-**vLLM (Upstream - No Changes Needed):**
-- Built-in span: `llm_request` with full lifecycle metrics
-- Trace context extraction from HTTP headers (existing feature)
-- Enable via: `--otlp-traces-endpoint` flag
-
-**Status:** Proof-of-concept implementation exists in working branches. Not yet merged to upstream.
-
-### Phase 2: Detailed Observability (Future)
-
-**Gateway:**
-- Scheduler child spans (filters, scorers, pickers) for detailed scheduling decision visibility
-- Response processing spans for streaming response handling
-
-**Deliverable:** Enhanced decision visibility and response processing metrics
-
-### Phase 3: Advanced Features (Future)
-
-- Flow control spans (queue management, fairness)
-- Fine-grained vLLM internal spans (worker communication, model execution steps)
-- P/D disaggregation spans (prefill/decode coordination)
