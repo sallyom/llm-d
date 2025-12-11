@@ -54,7 +54,7 @@ decode:
       enabled: true
       portName: "metrics" # decode vLLM service port (from routing.proxy.targetPort)
       path: "/metrics"
-      interval: "30s"
+      interval: "5s"
   containers:
   - name: "vllm"
     image: quay.io/sallyom/vllm:tracing
@@ -138,7 +138,7 @@ prefill:
       enabled: true
       portName: "metrics" # prefill vLLM service port (from routing.servicePort)
       path: "/metrics"
-      interval: "30s"
+      interval: "5s"
   containers:
   - name: "vllm"
     image: quay.io/sallyom/vllm:tracing
