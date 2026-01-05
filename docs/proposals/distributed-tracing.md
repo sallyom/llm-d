@@ -131,7 +131,7 @@ initializes its tracer and creates custom spans.
 
 **Current Status:**
 - **Gateway (GAIE)**: Tracing implemented in working branch `release-1.2-tracing`
-- **KV Cache Manager**: Tracing implemented in working branch `tracing`
+- **KV Cache**: Tracing implemented in working branch `tracing`
 - **llm-d-inference-scheduler (EPP + P/D Sidecar)**: Tracing implemented in working branch `tracing`
 - **vLLM**: Built-in `llm_request` span support (upstream feature)
 
@@ -190,21 +190,25 @@ with self.tracer.start_as_current_span("vllm.scheduler.schedule") as span:
 - `llm_d.epp.prerequest.pd_disaggregation`: P/D disaggregation header setup (added in `pkg/plugins/pre-request/pd_prerequest.go`)
   - Attributes: model, request ID, disaggregation enabled flag, prefill pod address/port, reason (if disabled)
 
-#### **KV Cache Manager**
+- `llm_d.epp.profile_handler.pick`: P/D profile selection decision point (added in `pkg/plugins/profile/pd_profile_handler.go`)
+  - Attributes: total_profiles, executed_profiles, decision (run_decode/complete/decode_only/prefill_decode), selected_profile, pd_threshold, user_input_bytes, cache_hit_ratio, cache_hits, non_cached_bytes, reason
+  - Enables understanding of P/D disaggregation decisions: why requests used or skipped disaggregation
+
+#### **KV Cache**
 
 **Proposed Spans:**
-- `llm_d.kv_cache_manager.get_scores`: Main scoring operation (SERVER span)
+- `llm_d.kv_cache.get_scores`: Main scoring operation (SERVER span)
   - Added in: `pkg/kvcache/indexer.go` (GetPodScores method)
   - Attributes: model name, pod count, considered pods list, block keys count, total blocks available, hit ratio, pods with hits count, pods with hits list
   - Error tracking: Records errors from tokenization, lookup, or scoring failures
   - Pod tracking: Records all considered pods and which pods had cache hits
 
-- `llm_d.kv_cache_manager.storage.lookup`: Storage backend lookup (INTERNAL span)
+- `llm_d.kv_cache.storage.lookup`: Storage backend lookup (INTERNAL span)
   - Added in: `pkg/kvcache/indexer.go` (lookupWithSpan wrapper)
   - Attributes: block count, pod filter count, cache hit flag, blocks found
   - Error tracking: Records errors from Redis/Valkey lookup failures
 
-- `llm_d.kv_cache_manager.scorer.compute`: Scoring algorithm execution (INTERNAL span)
+- `llm_d.kv_cache.scorer.compute`: Scoring algorithm execution (INTERNAL span)
   - Added in: `pkg/kvcache/indexer.go` (scoreWithSpan wrapper)
   - Attributes: scoring algorithm/strategy, key count, score distribution (max, avg), pods scored
   - Error tracking: Records errors from scoring computation
@@ -314,9 +318,9 @@ shutdownTracing, err := telemetry.InitTracing(ctx)
 defer shutdownTracing(ctx)
 ```
 
-**KV Cache Manager (Go):**
+**KV Cache (Go):**
 ```go
-// Proposed in: github.com/llm-d/llm-d-kv-cache-manager/pkg/telemetry/tracing.go
+// Proposed in: github.com/llm-d/llm-d-kv-cache/pkg/telemetry/tracing.go
 func InitTracing(ctx context.Context) (func(context.Context) error, error) {
     // Same implementation as llm-d-inference-scheduler
     // Reads OTEL environment variables
@@ -508,45 +512,45 @@ gateway.request (2150ms) [SERVER - service: gateway-api-inference-extension]
                 └── gen_ai.latency.time_in_model_inference: 2.037s
 ```
 
-**KV Cache Manager Span Details:**
+**KV Cache Span Details:**
 
-When the precise-prefix-cache-scorer plugin is invoked during scheduling, it calls the KV Cache Manager which creates additional child spans:
+When the precise-prefix-cache-scorer plugin is invoked during scheduling, it calls the KV Cache which creates additional child spans:
 
 ```
 llm_d.epp.scorer.prefix_cache (12ms) [INTERNAL]
-├── [Calls KV Cache Manager GetPodScores RPC]
+├── [Calls KV Cache GetPodScores RPC]
 │
-└── llm_d.kv_cache_manager.get_scores (10ms) [SERVER - service: kv-cache-manager]
+└── llm_d.kv_cache.get_scores (10ms) [SERVER - service: kv-cache]
     ├── Span ID: 7c2b5a8f3e1d9042
     ├── Parent: 5e7f9a2c8d1b3046 (llm_d.epp.scorer.prefix_cache)
     ├── Attributes:
     │   ├── gen_ai.request.model: "Qwen/Qwen3-0.6B"
-    │   ├── llm_d.kv_cache_manager.pod_count: 3
-    │   ├── llm_d.kv_cache_manager.considered_pods: ["10.244.0.13", "10.244.0.14", "10.244.0.15"]
-    │   ├── llm_d.kv_cache_manager.block_keys.count: 16
-    │   ├── llm_d.kv_cache_manager.total_blocks_available: 1024
-    │   ├── llm_d.kv_cache_manager.hit_ratio: 0.67
-    │   ├── llm_d.kv_cache_manager.pods_with_hits: 2
-    │   └── llm_d.kv_cache_manager.pods_with_hits_list: ["10.244.0.14", "10.244.0.15"]
+    │   ├── llm_d.kv_cache.pod_count: 3
+    │   ├── llm_d.kv_cache.considered_pods: ["10.244.0.13", "10.244.0.14", "10.244.0.15"]
+    │   ├── llm_d.kv_cache.block_keys.count: 16
+    │   ├── llm_d.kv_cache.total_blocks_available: 1024
+    │   ├── llm_d.kv_cache.hit_ratio: 0.67
+    │   ├── llm_d.kv_cache.pods_with_hits: 2
+    │   └── llm_d.kv_cache.pods_with_hits_list: ["10.244.0.14", "10.244.0.15"]
     │
-    ├── llm_d.kv_cache_manager.storage.lookup (6ms) [INTERNAL]
+    ├── llm_d.kv_cache.storage.lookup (6ms) [INTERNAL]
     │   ├── Span ID: 4f8e2c1a6d3b9057
     │   ├── Parent: 7c2b5a8f3e1d9042
     │   └── Attributes:
-    │       ├── llm_d.kv_cache_manager.lookup.block_count: 16
-    │       ├── llm_d.kv_cache_manager.lookup.pod_filter_count: 3
-    │       ├── llm_d.kv_cache_manager.lookup.cache_hit: true
-    │       └── llm_d.kv_cache_manager.lookup.blocks_found: 11
+    │       ├── llm_d.kv_cache.lookup.block_count: 16
+    │       ├── llm_d.kv_cache.lookup.pod_filter_count: 3
+    │       ├── llm_d.kv_cache.lookup.cache_hit: true
+    │       └── llm_d.kv_cache.lookup.blocks_found: 11
     │
-    └── llm_d.kv_cache_manager.scorer.compute (3ms) [INTERNAL]
+    └── llm_d.kv_cache.scorer.compute (3ms) [INTERNAL]
         ├── Span ID: 9a3d7f5b2e8c1046
         ├── Parent: 7c2b5a8f3e1d9042
         └── Attributes:
-            ├── llm_d.kv_cache_manager.scorer.algorithm: "hit_count"
-            ├── llm_d.kv_cache_manager.scorer.key_count: 16
-            ├── llm_d.kv_cache_manager.score.max: 11.0
-            ├── llm_d.kv_cache_manager.score.avg: 7.3
-            └── llm_d.kv_cache_manager.scorer.pods_scored: 3
+            ├── llm_d.kv_cache.scorer.algorithm: "hit_count"
+            ├── llm_d.kv_cache.scorer.key_count: 16
+            ├── llm_d.kv_cache.score.max: 11.0
+            ├── llm_d.kv_cache.score.avg: 7.3
+            └── llm_d.kv_cache.scorer.pods_scored: 3
 ```
 
 ### Semantic Conventions and Attributes
