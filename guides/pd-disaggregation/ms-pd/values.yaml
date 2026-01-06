@@ -9,7 +9,7 @@ modelArtifacts:
 routing:
   servicePort: 8000
   proxy:
-    image: quay.io/sallyom/llm-d-routing-sidecar:tracing-pd-new
+    image: quay.io/sallyom/llm-d-routing-sidecar:tracing
     connector: nixlv2
     secure: false
     # OpenTelemetry distributed tracing configuration for P/D sidecar
@@ -24,24 +24,6 @@ routing:
         value: "parentbased_traceidratio"
       - name: OTEL_TRACES_SAMPLER_ARG
         value: "1.0"
-      # Kubernetes resource attributes
-      - name: OTEL_RESOURCE_ATTRIBUTES_NODE_NAME
-        valueFrom:
-          fieldRef:
-            apiVersion: v1
-            fieldPath: spec.nodeName
-      - name: OTEL_RESOURCE_ATTRIBUTES_POD_NAME
-        valueFrom:
-          fieldRef:
-            apiVersion: v1
-            fieldPath: metadata.name
-      - name: OTEL_RESOURCE_ATTRIBUTES_NAMESPACE
-        valueFrom:
-          fieldRef:
-            apiVersion: v1
-            fieldPath: metadata.namespace
-      - name: OTEL_RESOURCE_ATTRIBUTES
-        value: 'k8s.namespace.name=$(OTEL_RESOURCE_ATTRIBUTES_NAMESPACE),k8s.node.name=$(OTEL_RESOURCE_ATTRIBUTES_NODE_NAME),k8s.pod.name=$(OTEL_RESOURCE_ATTRIBUTES_POD_NAME)'
 
 decode:
   parallelism:
