@@ -56,7 +56,7 @@ inferenceExtension:
       enabled: true
       auth:
         # To allow unauthenticated /metrics access (e.g., for debugging with curl), set to false
-        enabled: true
+        enabled: false
 
   # OpenTelemetry distributed tracing configuration
   tracing:
