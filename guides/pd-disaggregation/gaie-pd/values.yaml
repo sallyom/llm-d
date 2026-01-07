@@ -9,6 +9,7 @@ inferenceExtension:
     #hub: ghcr.io/llm-d
     #tag: v0.4.0
     hub: quay.io/sallyom
+    #tag: tracing-llmd-only
     tag: tracing
     pullPolicy: Always
   extProcPort: 9002

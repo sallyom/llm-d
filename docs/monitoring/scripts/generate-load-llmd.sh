@@ -260,13 +260,13 @@ show_final_metrics() {
     echo "Final metrics check..."
     echo "======================="
     echo "Looking for error metrics:"
-    curl -s http://localhost:8080/metrics | grep -E "inference.*error" || echo "No error metrics found yet"
+    curl -s http://localhost:8000/metrics | grep -E "inference.*error" || echo "No error metrics found yet"
     echo ""
     echo "Request metrics:"
-    curl -s http://localhost:8080/metrics | grep -E "inference.*request_total" || echo "No request metrics found"
+    curl -s http://localhost:8000/metrics | grep -E "inference.*request_total" || echo "No request metrics found"
     echo ""
     echo "All inference metrics:"
-    curl -s http://localhost:8080/metrics | grep -E "inference_" | grep -v "#" | head -10
+    curl -s http://localhost:8000/metrics | grep -E "inference_" | grep -v "#" | head -10
 }
 
 # Calculate end time
