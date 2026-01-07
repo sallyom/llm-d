@@ -160,39 +160,45 @@ with self.tracer.start_as_current_span("vllm.scheduler.schedule") as span:
 #### **Inference Gateway (gateway-api-inference-extension)**
 
 **Proposed Spans:**
-- `gateway.request`: Top-level request span with request metadata (SERVER span)
-  - Added in: `pkg/epp/handlers/server.go`
-  - Attributes: model name, target model, request size, streaming mode, response size, token counts (prompt, completion, cached)
-  - Status tracking: Records errors and sets error status on failures
-
-- `gateway.director.handle_request`: Admission control decisions (INTERNAL span)
-  - Added in: `pkg/epp/requestcontrol/director.go`
-  - Attributes: candidate pods count, admission priority, admission result (admitted/rejected), target pod name/endpoint
-  - Error tracking: Records errors from admission rejection or scheduling failures
-
-- `gateway.scheduler.schedule`: Pod selection with scheduling details (INTERNAL span)
-  - Added in: `pkg/epp/scheduling/scheduler.go`
-  - Attributes: candidate pods count, request ID, scheduling result (scheduled/failed), selected pod name/namespace
+- `gateway.request`: Top-level request span wrapping entire gateway processing (SERVER span)
+  - Added in: `pkg/epp/handlers/server.go` (Process method)
+  - Span created at request entry, ended when processing completes
+  - Provides end-to-end visibility into gateway request handling
 
 **Trace Context Propagation:**
-- W3C trace context (traceparent, tracestate) injected into HTTP headers in `generateHeaders()`
-- Headers propagated to downstream components (P/D sidecar, vLLM)
+- W3C trace context (traceparent, tracestate) injected into HTTP headers in `pkg/epp/handlers/request.go` (generateHeaders function)
+- Headers propagated to downstream components (EPP plugins, P/D sidecar, vLLM)
 - Enables end-to-end distributed tracing across all llm-d components
 
-**Additional Proposed Spans (llm-d-inference-scheduler plugins):**
+**Implementation Notes:**
+- Gateway provides single entry span that wraps all request processing
+- EPP plugins (from llm-d-inference-scheduler) execute within the gateway process and create child spans
+- Simplified approach compared to instrumenting individual gateway internal operations
+- Focus on plugin-level visibility where critical scheduling and routing decisions occur
+
+#### **EPP Plugins (llm-d-inference-scheduler)**
+
+EPP plugins run within the gateway-api-inference-extension process but are provided by llm-d-inference-scheduler. These plugins create child spans under the gateway.request span:
+
+**Proposed Spans:**
 - `llm_d.epp.startup`: Pod startup span (added in `cmd/epp/main.go`)
   - Attributes: component, operation
-  - Status tracking: Sets span status to Error on startup failures, Ok on success
+  - Status tracking: Records errors on startup failures
 
 - `llm_d.epp.scorer.prefix_cache`: Precise prefix cache scoring (added in `pkg/plugins/scorer/precise_prefix_cache.go`)
   - Attributes: candidate pods, model, request ID, scores computed, score distribution (max, avg), pods scored
+  - Parent span: gateway.request
 
 - `llm_d.epp.prerequest.pd_disaggregation`: P/D disaggregation header setup (added in `pkg/plugins/pre-request/pd_prerequest.go`)
   - Attributes: model, request ID, disaggregation enabled flag, prefill pod address/port, reason (if disabled)
+  - Parent span: gateway.request
 
 - `llm_d.epp.profile_handler.pick`: P/D profile selection decision point (added in `pkg/plugins/profile/pd_profile_handler.go`)
   - Attributes: total_profiles, executed_profiles, decision (run_decode/complete/decode_only/prefill_decode), selected_profile, pd_threshold, user_input_bytes, cache_hit_ratio, cache_hits, non_cached_bytes, reason
+  - Highlights decision of whether to use decode-only or prefill+decode based on cache hit ratio and input size
   - Enables understanding of P/D disaggregation decisions: why requests used or skipped disaggregation
+  - Status tracking: Records errors when unable to compute user input bytes
+  - Parent span: gateway.request
 
 #### **KV Cache**
 
@@ -388,60 +394,51 @@ Total Duration: 2150ms
 
 gateway.request (2150ms) [SERVER - service: gateway-api-inference-extension]
 ├── Span ID: 00f067aa0ba902b7
-├── Attributes:
-│   ├── gen_ai.request.model: "Qwen/Qwen3-0.6B"
-│   ├── gateway.target_model: "Qwen/Qwen3-0.6B"
-│   ├── gateway.request.size_bytes: 1024
-│   ├── gateway.response.streaming: true
-│   ├── gateway.target_pod.name: "vllm-decode-pod-0"
-│   ├── gateway.target_pod.ip: "10.244.0.15"
-│   ├── gen_ai.usage.prompt_tokens: 128
-│   ├── gen_ai.usage.completion_tokens: 512
-│   └── gen_ai.usage.cached_tokens: 64
+├── Wraps entire gateway processing including scheduling, EPP plugins, and response handling
 │
-├── gateway.director.handle_request (45ms) [INTERNAL]
-│   ├── Span ID: b7ad6b7169203331
-│   ├── Parent: 00f067aa0ba902b7
-│   ├── Attributes:
-│   │   ├── gateway.admission.candidate_pods: 3
-│   │   ├── gateway.admission.priority: 100
-│   │   ├── gateway.admission.result: "admitted"
-│   │   ├── gateway.target_pod.name: "vllm-decode-pod-0"
-│   │   └── gateway.target_endpoint: "10.244.0.15:8200"
+├── [EPP Plugin Execution - llm-d-inference-scheduler spans]
 │   │
-│   └── gateway.scheduler.schedule (38ms) [INTERNAL]
-│       ├── Span ID: 3fb7a1d9928de634
-│       ├── Parent: b7ad6b7169203331
-│       ├── Attributes:
-│       │   ├── gateway.scheduler.candidate_pods: 3
-│       │   ├── gateway.request.id: "req-12345"
-│       │   ├── gateway.scheduler.result: "scheduled"
-│       │   ├── gateway.target_pod.name: "vllm-decode-pod-0"
-│       │   └── gateway.target_pod.namespace: "llmd"
-│       │
-│       ├── llm_d.epp.scorer.prefix_cache (12ms) [INTERNAL]
-│       │   ├── Span ID: 5e7f9a2c8d1b3046
-│       │   ├── Parent: 3fb7a1d9928de634
-│       │   ├── Attributes:
-│       │   │   ├── gen_ai.request.model: "Qwen/Qwen3-0.6B"
-│       │   │   ├── gen_ai.request.id: "req-12345"
-│       │   │   ├── llm_d.scorer.candidate_pods: 3
-│       │   │   ├── llm_d.scorer.scores_computed: 3
-│       │   │   ├── llm_d.scorer.score.max: 0.85
-│       │   │   ├── llm_d.scorer.score.avg: 0.62
-│       │   │   └── llm_d.scorer.pods_scored: 3
-│       │   │
-│       │   └── [Calls KV Cache Manager GetPodScores RPC]
-│       │
-│       └── llm_d.epp.prerequest.pd_disaggregation (2ms) [INTERNAL]
-│           ├── Span ID: 9c4a6f2e8b5d1037
-│           ├── Parent: 3fb7a1d9928de634
-│           └── Attributes:
-│               ├── gen_ai.request.model: "Qwen/Qwen3-0.6B"
-│               ├── gen_ai.request.id: "req-12345"
-│               ├── llm_d.epp.pd.disaggregation_enabled: true
-│               ├── llm_d.epp.pd.prefill_pod_address: "10.244.0.14"
-│               └── llm_d.epp.pd.prefill_pod_port: "8200"
+│   ├── llm_d.epp.scorer.prefix_cache (12ms) [INTERNAL]
+│   │   ├── Span ID: 5e7f9a2c8d1b3046
+│   │   ├── Parent: 00f067aa0ba902b7
+│   │   ├── Attributes:
+│   │   │   ├── gen_ai.request.model: "Qwen/Qwen3-0.6B"
+│   │   │   ├── gen_ai.request.id: "req-12345"
+│   │   │   ├── llm_d.scorer.candidate_pods: 3
+│   │   │   ├── llm_d.scorer.scores_computed: 3
+│   │   │   ├── llm_d.scorer.score.max: 0.85
+│   │   │   ├── llm_d.scorer.score.avg: 0.62
+│   │   │   └── llm_d.scorer.pods_scored: 3
+│   │   │
+│   │   └── [Calls KV Cache Manager GetPodScores RPC]
+│   │
+│   ├── llm_d.epp.profile_handler.pick (3ms) [INTERNAL]
+│   │   ├── Span ID: 4a5b6c7d8e9f0123
+│   │   ├── Parent: 00f067aa0ba902b7
+│   │   ├── Attributes:
+│   │   │   ├── gen_ai.request.model: "Qwen/Qwen3-0.6B"
+│   │   │   ├── gen_ai.request.id: "req-12345"
+│   │   │   ├── llm_d.profile_handler.total_profiles: 2
+│   │   │   ├── llm_d.profile_handler.executed_profiles: 1
+│   │   │   ├── llm_d.profile_handler.decision: "prefill_decode"
+│   │   │   ├── llm_d.profile_handler.selected_profile: "prefill"
+│   │   │   ├── llm_d.profile_handler.pd_threshold: 1024
+│   │   │   ├── llm_d.profile_handler.user_input_bytes: 2048
+│   │   │   ├── llm_d.profile_handler.cache_hit_ratio: 0.31
+│   │   │   ├── llm_d.profile_handler.cache_hits: 8
+│   │   │   └── llm_d.profile_handler.non_cached_bytes: 1413.12
+│   │   │
+│   │   └── Critical P/D decision point - determines decode-only vs prefill+decode
+│   │
+│   └── llm_d.epp.prerequest.pd_disaggregation (2ms) [INTERNAL]
+│       ├── Span ID: 9c4a6f2e8b5d1037
+│       ├── Parent: 00f067aa0ba902b7
+│       └── Attributes:
+│           ├── gen_ai.request.model: "Qwen/Qwen3-0.6B"
+│           ├── gen_ai.request.id: "req-12345"
+│           ├── llm_d.epp.pd.disaggregation_enabled: true
+│           ├── llm_d.epp.pd.prefill_pod_address: "10.244.0.14"
+│           └── llm_d.epp.pd.prefill_pod_port: "8200"
 │
 └── [HTTP Request to P/D Proxy with trace + prefill headers]
     │   traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
@@ -564,10 +561,12 @@ llm_d.epp.scorer.prefix_cache (12ms) [INTERNAL]
 - Namespace: `llm_d.*` or component-specific (`vllm.*`, `kvcache.*`)
 - Avoid high-cardinality attributes
 
-- **Use span status for operation outcomes**:
-  - Success: `span.SetStatus(codes.Ok, "")`
-  - Failure: `span.RecordError(err)` + `span.SetStatus(codes.Error, "description")`
-- Span status is the standard way to represent operation success/failure and integrates with observability backends for filtering and alerting
+**Span Status (Minimal Approach):**
+- **Default (Success)**: Spans default to "Unset" status, which is treated as success by observability backends
+- **Failure Only**: Only set status for errors: `span.SetStatus(codes.Error, "description")`
+- **No Explicit Success**: Do not use `span.SetStatus(codes.Ok, "")` - the default "Unset" is sufficient
+- **Error Details**: Rely on structured logging for detailed error information and stack traces
+- **Rationale**: Minimal overhead, clear separation of concerns (traces for flow, logs for debugging)
 
 ## Alternatives Considered
 
