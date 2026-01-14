@@ -9,14 +9,16 @@ inferenceExtension:
     #hub: ghcr.io/llm-d
     #tag: v0.4.0
     hub: quay.io/sallyom
-    #tag: tracing-llmd-only
-    tag: tracing
+    tag: tracing-pd-metrics
+    #tag: tracing
     pullPolicy: Always
   extProcPort: 9002
   pluginsConfigFile: "pd-config.yaml"
   pluginsCustomConfig: # THIS CONFIG NEEDS TO BE CHECKED FOR INF SCHEDULER NEW IMAGE
     pd-config.yaml: |
-      # ALWAYS DO PD IN THIS EXAMPLE (THRESHOLD 0)
+      # P/D Disaggregation Configuration for Tracing Demo
+      # - threshold: 0 ensures ALL requests use P/D disaggregation to showcase tracing metrics
+      # - This demonstrates True TTFT vs vLLM TTFT gap and coordinator-level observability
       apiVersion: inference.networking.x-k8s.io/v1alpha1
       kind: EndpointPickerConfig
       featureGates:
@@ -65,7 +67,7 @@ inferenceExtension:
     # OTLP endpoint for trace export
     otelExporterEndpoint: "http://llm-d-collector-collector.observability-hub.svc.cluster.local:4317"
     sampling:
-      # Parent-based sampling with 100% trace ratio
+      # Parent-based sampling with 100% trace ratio for demo (production would use 0.1 = 10%)
       sampler: "parentbased_traceidratio"
       samplerArg: "1.0"
 

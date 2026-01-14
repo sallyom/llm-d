@@ -102,14 +102,12 @@
       "targets": [
         {
           "datasource": {
-            "type": "tempo",
-            "uid": "tempo"
+            "type": "prometheus",
+            "uid": "prometheus"
           },
-          "limit": 100,
-          "query": "{resource.service.name=\"llm-d-pd-proxy\" && name=\"llm_d.pd_proxy.decode\"} | select(span.llm_d.pd_proxy.true_ttft_ms)",
-          "queryType": "traceqlMetrics",
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(llm_d_inference_scheduler_pd_proxy_true_ttft_milliseconds_bucket[5m])))",
           "refId": "A",
-          "step": "auto"
+          "legendFormat": "p50 True TTFT"
         }
       ],
       "title": "Avg True TTFT (Coordinator)",
@@ -181,7 +179,7 @@
             "uid": "tempo"
           },
           "limit": 100,
-          "query": "{resource.service.name=\"vllm-decode\" && name=\"llm_request\"} | select(span.gen_ai.latency.time_to_first_token)",
+          "query": "{resource.service.name=\"vllm-decode\" && name=\"llm_request\"} | avg_over_time(span.gen_ai.latency.time_to_first_token) * 1000",
           "queryType": "traceqlMetrics",
           "refId": "A",
           "step": "auto"
@@ -260,14 +258,12 @@
       "targets": [
         {
           "datasource": {
-            "type": "tempo",
-            "uid": "tempo"
+            "type": "prometheus",
+            "uid": "prometheus"
           },
-          "limit": 100,
-          "query": "{resource.service.name=\"llm-d-pd-proxy\" && name=\"llm_d.pd_proxy.decode\"} | select(span.llm_d.pd_proxy.kv_transfer_overhead_ms)",
-          "queryType": "traceqlMetrics",
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(llm_d_inference_scheduler_pd_proxy_kv_transfer_overhead_milliseconds_bucket[5m])))",
           "refId": "A",
-          "step": "auto"
+          "legendFormat": "p50 KV Transfer Overhead"
         }
       ],
       "title": "Avg KV Transfer Overhead",
@@ -323,14 +319,12 @@
       "targets": [
         {
           "datasource": {
-            "type": "tempo",
-            "uid": "tempo"
+            "type": "prometheus",
+            "uid": "prometheus"
           },
-          "limit": 100,
-          "query": "{resource.service.name=\"llm-d-pd-proxy\" && name=\"llm_d.pd_proxy.decode\"} | select(span.llm_d.pd_proxy.true_ttft_ms)",
-          "queryType": "traceqlMetrics",
+          "expr": "sum(llm_d_inference_scheduler_pd_proxy_true_ttft_milliseconds_count)",
           "refId": "A",
-          "step": "auto"
+          "legendFormat": "Total Requests"
         }
       ],
       "title": "Total P/D Requests",
@@ -421,14 +415,30 @@
       "targets": [
         {
           "datasource": {
-            "type": "tempo",
-            "uid": "tempo"
+            "type": "prometheus",
+            "uid": "prometheus"
           },
-          "limit": 100,
-          "query": "{resource.service.name=\"llm-d-pd-proxy\" && name=\"llm_d.pd_proxy.decode\"} | select(span.llm_d.pd_proxy.true_ttft_ms)",
-          "queryType": "traceqlMetrics",
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(llm_d_inference_scheduler_pd_proxy_true_ttft_milliseconds_bucket[$__rate_interval])))",
           "refId": "A",
-          "step": "auto"
+          "legendFormat": "p50"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(llm_d_inference_scheduler_pd_proxy_true_ttft_milliseconds_bucket[$__rate_interval])))",
+          "refId": "B",
+          "legendFormat": "p95"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(llm_d_inference_scheduler_pd_proxy_true_ttft_milliseconds_bucket[$__rate_interval])))",
+          "refId": "C",
+          "legendFormat": "p99"
         }
       ],
       "title": "True TTFT (P/D Coordinator)",
@@ -515,14 +525,21 @@
       "targets": [
         {
           "datasource": {
-            "type": "tempo",
-            "uid": "tempo"
+            "type": "prometheus",
+            "uid": "prometheus"
           },
-          "limit": 100,
-          "query": "{resource.service.name=\"llm-d-pd-proxy\" && name=\"llm_d.pd_proxy.decode\"} | select(span.llm_d.pd_proxy.total_duration_ms)",
-          "queryType": "traceqlMetrics",
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(llm_d_inference_scheduler_pd_proxy_total_duration_milliseconds_bucket[$__rate_interval])))",
           "refId": "A",
-          "step": "auto"
+          "legendFormat": "p50"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(llm_d_inference_scheduler_pd_proxy_total_duration_milliseconds_bucket[$__rate_interval])))",
+          "refId": "B",
+          "legendFormat": "p95"
         }
       ],
       "title": "Total Request Duration (P/D Coordinator)",
@@ -591,14 +608,12 @@
       "targets": [
         {
           "datasource": {
-            "type": "tempo",
-            "uid": "tempo"
+            "type": "prometheus",
+            "uid": "prometheus"
           },
-          "limit": 100,
-          "query": "{resource.service.name=\"llm-d-pd-proxy\" && name=\"llm_d.pd_proxy.decode\"} | select(span.llm_d.pd_proxy.prefill_duration_ms)",
-          "queryType": "traceqlMetrics",
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(llm_d_inference_scheduler_pd_proxy_prefill_duration_milliseconds_bucket[$__rate_interval])))",
           "refId": "A",
-          "step": "auto"
+          "legendFormat": "p50"
         }
       ],
       "title": "Prefill Duration",
@@ -654,14 +669,12 @@
       "targets": [
         {
           "datasource": {
-            "type": "tempo",
-            "uid": "tempo"
+            "type": "prometheus",
+            "uid": "prometheus"
           },
-          "limit": 100,
-          "query": "{resource.service.name=\"llm-d-pd-proxy\" && name=\"llm_d.pd_proxy.decode\"} | select(span.llm_d.pd_proxy.decode_duration_ms)",
-          "queryType": "traceqlMetrics",
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(llm_d_inference_scheduler_pd_proxy_decode_duration_milliseconds_bucket[$__rate_interval])))",
           "refId": "A",
-          "step": "auto"
+          "legendFormat": "p50"
         }
       ],
       "title": "Decode Duration",
@@ -756,14 +769,12 @@
       "targets": [
         {
           "datasource": {
-            "type": "tempo",
-            "uid": "tempo"
+            "type": "prometheus",
+            "uid": "prometheus"
           },
-          "limit": 100,
-          "query": "{resource.service.name=\"llm-d-pd-proxy\" && name=\"llm_d.pd_proxy.decode\"} | select(span.llm_d.pd_proxy.kv_transfer_overhead_ms)",
-          "queryType": "traceqlMetrics",
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(llm_d_inference_scheduler_pd_proxy_kv_transfer_overhead_milliseconds_bucket[$__rate_interval])))",
           "refId": "A",
-          "step": "auto"
+          "legendFormat": "p50"
         }
       ],
       "title": "KV Transfer Overhead",
@@ -833,14 +844,12 @@
       "targets": [
         {
           "datasource": {
-            "type": "tempo",
-            "uid": "tempo"
+            "type": "prometheus",
+            "uid": "prometheus"
           },
-          "limit": 100,
-          "query": "{resource.service.name=\"llm-d-pd-proxy\" && name=\"llm_d.pd_proxy.decode\"} | select(span.llm_d.pd_proxy.true_ttft_ms)",
-          "queryType": "traceqlMetrics",
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(llm_d_inference_scheduler_pd_proxy_true_ttft_milliseconds_bucket[$__rate_interval])))",
           "refId": "A",
-          "step": "auto"
+          "legendFormat": "Coordinator True TTFT (p50)"
         }
       ],
       "title": "True TTFT (Coordinator)",
@@ -860,7 +869,7 @@
           "custom": {
             "axisCenteredZero": false,
             "axisColorMode": "text",
-            "axisLabel": "TTFT (seconds)",
+            "axisLabel": "TTFT (ms)",
             "axisPlacement": "auto",
             "drawStyle": "line",
             "fillOpacity": 20,
@@ -868,7 +877,7 @@
             "lineWidth": 2,
             "showPoints": "auto"
           },
-          "unit": "s"
+          "unit": "ms"
         },
         "overrides": []
       },
@@ -901,7 +910,7 @@
             "uid": "tempo"
           },
           "limit": 100,
-          "query": "{resource.service.name=\"vllm-decode\" && name=\"llm_request\"} | select(span.gen_ai.latency.time_to_first_token)",
+          "query": "{resource.service.name=\"vllm-decode\" && name=\"llm_request\"} | quantile_over_time(span.gen_ai.latency.time_to_first_token, 0.5) * 1000",
           "queryType": "traceqlMetrics",
           "refId": "A",
           "step": "auto"

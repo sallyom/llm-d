@@ -1,15 +1,15 @@
 multinode: false
 
 modelArtifacts:
-  uri: "hf://Qwen/Qwen3-0.6B"
+  uri: "hf://meta-llama/Llama-3.1-8B-Instruct"
   size: 20Gi
   authSecretName: "llm-d-hf-token"
-  name: "Qwen/Qwen3-0.6B"
+  name: "meta-llama/Llama-3.1-8B-Instruct"
 
 routing:
   servicePort: 8000
   proxy:
-    image: quay.io/sallyom/llm-d-routing-sidecar:tracing
+    image: quay.io/sallyom/llm-d-routing-sidecar:tracing-pd-metrics
     connector: nixlv2
     secure: false
     # OpenTelemetry distributed tracing configuration for P/D sidecar
@@ -23,11 +23,11 @@ routing:
       - name: OTEL_TRACES_SAMPLER
         value: "parentbased_traceidratio"
       - name: OTEL_TRACES_SAMPLER_ARG
-        value: "1.0"
+        value: "1.0"  # 100% sampling for demo (production: 0.1 = 10%)
 
 decode:
   parallelism:
-    tensor: 1
+    tensor: 2
     data: 1
   create: true
   replicas: 1
@@ -44,7 +44,7 @@ decode:
     args:
       # Keep tensor-parallelism as the first set of arguments
       - "--tensor-parallel-size"
-      - "1"
+      - "2"
       - "--block-size"
       - "128"
       - "--kv-transfer-config"
@@ -54,6 +54,8 @@ decode:
       - "32000"
       - "--otlp-traces-endpoint"
       - "http://llm-d-collector-collector.observability-hub.svc.cluster.local:4317"
+      - "--collect-detailed-traces"
+      - "all"
     env:
       - name: VLLM_NIXL_SIDE_CHANNEL_HOST
         valueFrom:
@@ -69,9 +71,9 @@ decode:
         protocol: TCP
     resources:
       limits:
-        nvidia.com/gpu: "1"
+        nvidia.com/gpu: "2"
       requests:
-        nvidia.com/gpu: "1"
+        nvidia.com/gpu: "2"
     mountModelVolume: true
     volumeMounts:
     - name: metrics-volume
@@ -114,7 +116,7 @@ decode:
 
 prefill:
   create: true
-  replicas: 1
+  replicas: 2
   monitoring:
     podmonitor:
       enabled: true
@@ -135,6 +137,8 @@ prefill:
       - "32000"
       - "--otlp-traces-endpoint"
       - "http://llm-d-collector-collector.observability-hub.svc.cluster.local:4317"
+      - "--collect-detailed-traces"
+      - "all"
     env:
       - name: VLLM_NIXL_SIDE_CHANNEL_HOST
         valueFrom:

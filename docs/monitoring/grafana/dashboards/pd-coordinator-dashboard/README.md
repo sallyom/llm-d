@@ -45,49 +45,75 @@ The P/D sidecar acts as a coordinator with visibility into both prefill and deco
 
 ## Key TraceQL Queries
 
-### Get P/D Coordinator Metrics
+### TraceQL Metrics (for dashboards and aggregations)
 ```traceql
-# True TTFT from coordinator
+# Average True TTFT from coordinator
+{resource.service.name="llm-d-pd-proxy" && name="llm_d.pd_proxy.decode"} | avg_over_time(span.llm_d.pd_proxy.true_ttft_ms)
+
+# Median (p50) True TTFT over time
+{resource.service.name="llm-d-pd-proxy" && name="llm_d.pd_proxy.decode"} | quantile_over_time(span.llm_d.pd_proxy.true_ttft_ms, 0.5)
+
+# Total request count
+{resource.service.name="llm-d-pd-proxy" && name="llm_d.pd_proxy.decode"} | count_over_time()
+
+# Average total request duration
+{resource.service.name="llm-d-pd-proxy" && name="llm_d.pd_proxy.decode"} | avg_over_time(span.llm_d.pd_proxy.total_duration_ms)
+
+# Average prefill duration
+{resource.service.name="llm-d-pd-proxy" && name="llm_d.pd_proxy.decode"} | avg_over_time(span.llm_d.pd_proxy.prefill_duration_ms)
+
+# Average decode duration
+{resource.service.name="llm-d-pd-proxy" && name="llm_d.pd_proxy.decode"} | avg_over_time(span.llm_d.pd_proxy.decode_duration_ms)
+
+# Average KV transfer overhead
+{resource.service.name="llm-d-pd-proxy" && name="llm_d.pd_proxy.decode"} | avg_over_time(span.llm_d.pd_proxy.kv_transfer_overhead_ms)
+```
+
+### TraceQL Search (for exploring individual traces)
+```traceql
+# Find all P/D coordinator traces
+{resource.service.name="llm-d-pd-proxy" && name="llm_d.pd_proxy.decode"}
+
+# Find traces with high TTFT (>100ms)
+{resource.service.name="llm-d-pd-proxy" && name="llm_d.pd_proxy.decode" && span.llm_d.pd_proxy.true_ttft_ms > 100}
+
+# View specific trace attribute
 {resource.service.name="llm-d-pd-proxy" && name="llm_d.pd_proxy.decode"} | select(span.llm_d.pd_proxy.true_ttft_ms)
-
-# Total request duration
-{resource.service.name="llm-d-pd-proxy" && name="llm_d.pd_proxy.decode"} | select(span.llm_d.pd_proxy.total_duration_ms)
-
-# Prefill duration
-{resource.service.name="llm-d-pd-proxy" && name="llm_d.pd_proxy.decode"} | select(span.llm_d.pd_proxy.prefill_duration_ms)
-
-# Decode duration
-{resource.service.name="llm-d-pd-proxy" && name="llm_d.pd_proxy.decode"} | select(span.llm_d.pd_proxy.decode_duration_ms)
-
-# KV transfer overhead
-{resource.service.name="llm-d-pd-proxy" && name="llm_d.pd_proxy.decode"} | select(span.llm_d.pd_proxy.kv_transfer_overhead_ms)
 ```
 
 ### Compare Coordinator vs vLLM Instance Metrics
 ```traceql
-# Coordinator true TTFT (accurate)
-{resource.service.name="llm-d-pd-proxy" && name="llm_d.pd_proxy.decode"} | select(span.llm_d.pd_proxy.true_ttft_ms)
+# Coordinator true TTFT (accurate) - average over time
+{resource.service.name="llm-d-pd-proxy" && name="llm_d.pd_proxy.decode"} | avg_over_time(span.llm_d.pd_proxy.true_ttft_ms)
 
-# Decoder vLLM TTFT (artificially low - don't use this!)
-{resource.service.name="vllm-decode" && name="llm_request"} | select(span.gen_ai.latency.time_to_first_token * 1000)
+# Decoder vLLM TTFT (artificially low - don't use this!) - convert from seconds to ms
+{resource.service.name="vllm-decode" && name="llm_request"} | avg_over_time(span.gen_ai.latency.time_to_first_token) * 1000
 ```
 
 ### Filter by Connector Type
 ```traceql
-# NIXL v2 only
-{resource.service.name="llm-d-pd-proxy" && name="llm_d.pd_proxy.decode" && span.llm_d.pd_proxy.connector="nixlv2"} | select(span.llm_d.pd_proxy.true_ttft_ms)
+# NIXL v2 only - average TTFT
+{resource.service.name="llm-d-pd-proxy" && name="llm_d.pd_proxy.decode" && span.llm_d.pd_proxy.connector="nixlv2"} | avg_over_time(span.llm_d.pd_proxy.true_ttft_ms)
 
-# LMCache only
-{resource.service.name="llm-d-pd-proxy" && name="llm_d.pd_proxy.decode" && span.llm_d.pd_proxy.connector="lmcache"} | select(span.llm_d.pd_proxy.true_ttft_ms)
+# LMCache only - average TTFT
+{resource.service.name="llm-d-pd-proxy" && name="llm_d.pd_proxy.decode" && span.llm_d.pd_proxy.connector="lmcache"} | avg_over_time(span.llm_d.pd_proxy.true_ttft_ms)
 
-# SGLang only (concurrent P/D)
-{resource.service.name="llm-d-pd-proxy" && name="llm_d.pd_proxy.decode" && span.llm_d.pd_proxy.connector="sglang"} | select(span.llm_d.pd_proxy.true_ttft_ms)
+# SGLang only (concurrent P/D) - average TTFT
+{resource.service.name="llm-d-pd-proxy" && name="llm_d.pd_proxy.decode" && span.llm_d.pd_proxy.connector="sglang"} | avg_over_time(span.llm_d.pd_proxy.true_ttft_ms)
 ```
 
 ### Request Rate by Connector
 ```traceql
 {resource.service.name="llm-d-pd-proxy" && name="llm_d.pd_proxy.decode"} | by(span.llm_d.pd_proxy.connector) | rate()
 ```
+
+### Available Metrics Functions
+- `avg_over_time()` - Average values over time intervals
+- `quantile_over_time(attr, q)` - Calculate quantiles (e.g., 0.5 for median, 0.95 for p95)
+- `max_over_time()` - Maximum values over time
+- `min_over_time()` - Minimum values over time
+- `count_over_time()` - Count of spans over time
+- `rate()` - Rate of spans per second
 
 ## Deployment
 
