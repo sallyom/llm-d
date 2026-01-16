@@ -11,14 +11,14 @@
 - **Cluster**: 4 GPUs with TCP networking for KV cache transfer
 - **Model**: Llama-3.1-8B-Instruct
 - **Architecture**:
-  - 2 Prefill workers (TP=1 each, 1 GPU each)
-  - 1 Decode worker (TP=2, 2 GPUs)
+  - 2 Prefill workers (TP=1 each, 1 GPU each) - TP = Tensor Parallelism
+  - 1 Decode worker (TP=2, 2 GPUs) - model split across 2 GPUs
   - Heterogeneous parallelism: replicated prefill for throughput, wider decode for KV cache memory
 
 ### Expected Metrics
 - **True TTFT (Coordinator)**: 40-150ms
 - **vLLM TTFT (Decode)**: 20-70ms
-- **KV Transfer Overhead**: 5-20ms (TCP networking, would be 2-8ms with RDMA)
+- **KV Transfer Overhead**: 5-20ms (using TCP networking - RDMA would reduce this to 2-8ms)
 - **Gap Between Coordinator & vLLM**: 20-80ms ← **This is the observability problem we're solving**
 
 ---
@@ -27,9 +27,9 @@
 
 **SAY:**
 > "I'm demonstrating distributed tracing for llm-d with prefill-decode disaggregation. I have a 4-GPU deployment running Llama-3.1-8B with:
-> - **2 single-GPU prefill workers** for handling concurrent prompt processing
-> - **1 decode worker split across 2 GPUs** for larger KV cache capacity
-> - **TCP networking via NIXL** for KV cache transfer between prefill and decode
+> - **2 single-GPU prefill workers** (TP=1 each) for handling concurrent prompt processing
+> - **1 decode worker split across 2 GPUs** (TP=2) for larger KV cache capacity
+> - **TCP networking via NIXL** for KV cache transfer between prefill and decode - we're not using RDMA in this demo
 >
 > This demonstrates **heterogeneous parallelism** - the key P/D optimization pattern. Production 70B deployments use the same strategy at larger scale."
 
@@ -84,7 +84,7 @@ cd /path/to/llm-d
 *[Switch to Grafana P/D Coordinator Dashboard at http://localhost:3000/d/pd-coordinator-metrics]*
 
 **SAY:**
-> "This dashboard is powered entirely by distributed trace data from OpenTelemetry. Let's walk through the key sections."
+> "This dashboard shows P/D coordinator metrics from Prometheus - these metrics are being added in an open PR. Let's walk through the key sections to see aggregate performance."
 
 ### Top Stats Panel
 
@@ -97,7 +97,7 @@ cd /path/to/llm-d
 >
 > 2. **Avg vLLM TTFT (Decode)**: [point to value] - Notice this is **significantly lower**. The decode instance doesn't know about the prefill or transfer time.
 >
-> 3. **Avg KV Transfer Overhead**: [point to value] - With RDMA, this is only 2-8ms. Without RDMA, we'd see 3-5x higher overhead. This validates our networking setup.
+> 3. **Avg KV Transfer Overhead**: [point to value] - We're using TCP networking via NIXL, so we see 5-20ms overhead. With RDMA (RoCE + GPUDirect), this would drop to 2-8ms - about 2-3x lower. This metric helps quantify the value of RDMA upgrades.
 >
 > 4. **Total P/D Requests**: [point to value] - Number of disaggregated requests processed.
 >
@@ -111,7 +111,7 @@ cd /path/to/llm-d
 > "The time series shows how metrics evolve as we send varied load patterns:
 > - **True TTFT spikes** when long prompts arrive from Workers 1, 2, 4, and 6
 > - **Total Duration** shows end-to-end request latency including decode
-> - The variation shows different ISL/OSL ratios from our concurrent workers"
+> - The variation shows different ISL/OSL ratios from our concurrent workers - that's Input Sequence Length (prompt length) vs Output Sequence Length (generated tokens). Different workers send different prompt/output combinations to exercise various P/D scenarios."
 
 *[Scroll to Component Breakdown section]*
 
@@ -119,12 +119,12 @@ cd /path/to/llm-d
 > "This component breakdown is critical for optimization:
 > - **Prefill Duration**: Time spent processing the prompt
 > - **Decode Duration**: Time spent generating output tokens
-> - **KV Transfer Overhead**: RDMA transfer coordination time
+> - **KV Transfer Overhead**: Network transfer and coordination time (TCP in this demo)
 >
 > If we saw:
-> - **High prefill duration** → Add more prefill workers or reduce TP
-> - **High decode duration** → Increase TP on decode or add replicas
-> - **High KV transfer overhead** → RDMA tuning issue or network contention
+> - **High prefill duration** → Add more prefill workers or reduce tensor parallelism
+> - **High decode duration** → Increase tensor parallelism on decode or add replicas
+> - **High KV transfer overhead** → Network issue or need for RDMA upgrade
 >
 > This breakdown validates whether our 2P:1D ratio is optimal for this workload."
 
@@ -135,57 +135,77 @@ cd /path/to/llm-d
 
 ---
 
-## 5. Exploring Individual Traces (2 minutes)
-
-*[Open Grafana → Explore → Select Tempo datasource]*
+## 5. The Power of Tracing: What Metrics Can't Tell You (3-4 minutes)
 
 **SAY:**
-> "Let's look at an individual trace to see the end-to-end flow."
+> "The metrics dashboard shows us **aggregate performance** - p50, p95, averages across all requests. But here's what metrics **cannot** tell us:
+>
+> - **Why** a specific request was slow
+> - **Which exact path** a request took through the system
+> - **What decisions** were made for individual requests
+> - **The causal relationships** between operations
+> - **Request-level context** like cache hits, routing decisions, user attributes
+>
+> This is where distributed tracing becomes essential. Let me show you an actual trace."
 
-**RUN TraceQL Query:**
-```
-{resource.service.name="llm-d-pd-proxy" && name="llm_d.pd_proxy.decode"}
-```
-
-*[Select a trace with reasonable duration, click to open]*
+*[Switch to OpenShift Console → Observe → Traces]*
 
 **SAY:**
-> "In this trace, you can see the complete request lifecycle across all components:
->
-> 1. **gateway.request** span - The top-level request entering the system
->
-> 2. **llm_d.epp.scorer.prefix_cache** span - Shows KV cache-aware routing decisions
->    - Attributes show which pods had cached blocks for this request
->
-> 3. **llm_d.epp.profile_handler.pick** span - The P/D disaggregation decision
->    - Look at attributes: `decision`, `cache_hit_ratio`, `pd_threshold`, `user_input_bytes`
->    - This shows **why** the request chose prefill+decode vs decode-only mode
->
-> 4. **llm_d.pd_proxy.request** span - The coordinator's view
->    - Key metrics here: `true_ttft_ms`, `kv_transfer_overhead_ms`, `total_duration_ms`
->    - **This is the source of truth for client-experienced latency**
->
-> 5. **llm_d.pd_proxy.prefill** → **vllm:llm_request** (prefill) - Prefill execution
->    - Shows prefill duration and KV cache generation
->
-> 6. **llm_d.pd_proxy.decode** → **vllm:llm_request** (decode) - Decode execution
->    - Shows token generation with transferred KV cache
->    - Attributes include token counts: `gen_ai.usage.prompt_tokens`, `completion_tokens`
->
-> **This end-to-end visibility is impossible to get from metrics alone** - distributed tracing connects these components across network boundaries and shows the true critical path."
+> "I'm using the OpenShift Distributed Tracing console plugin to explore individual traces. While Grafana can query traces with TraceQL, the OpenShift console provides a better UI for exploring individual spans and their attributes. This gives us request-level visibility that aggregated metrics simply cannot provide."
 
-*[Optional: Click on specific spans to show attributes]*
+*[Search for or select a P/D trace with reasonable duration]*
+
+**SAY:**
+> "Looking at this individual trace, we can see the complete story of a single request:
+>
+> ### 1. **gateway.request** span - Entry point
+> - Shows the request entering the system with full context
+>
+> ### 2. **llm_d.epp.scorer.prefix_cache** span - Intelligent routing
+> - **Attributes reveal**: Which pods had cached KV blocks for this specific prompt
+> - Metrics can tell you average cache hit rate, but **only traces show cache decisions per request**
+>
+> ### 3. **llm_d.epp.profile_handler.pick** span - The P/D decision
+> - **Critical attributes**: `decision`, `cache_hit_ratio`, `pd_threshold`, `user_input_bytes`
+> - **This is the 'why'** - explains exactly why this request used P/D disaggregation vs decode-only
+> - **Metrics cannot answer**: 'Why was request X routed differently than request Y?'
+> - **Traces show**: The exact context and logic behind each routing decision
+>
+> ### 4. **llm_d.pd_proxy.request** span - Coordinator orchestration
+> - Attributes: `true_ttft_ms`, `kv_transfer_overhead_ms`, `total_duration_ms`
+> - Shows the **parent-child relationship** between prefill and decode operations
+> - **Metrics show**: Average overhead across all requests
+> - **Traces show**: The exact sequence and timing for this specific request
+>
+> ### 5. **llm_d.pd_proxy.prefill** → **vllm:llm_request** (prefill)
+> - Cross-service correlation: coordinator → vLLM instance
+> - Shows prefill execution and KV cache generation
+> - **Traces reveal**: The exact prefill instance selected and why
+>
+> ### 6. **llm_d.pd_proxy.decode** → **vllm:llm_request** (decode)
+> - Token generation with transferred KV cache
+> - Attributes: `gen_ai.usage.prompt_tokens`, `completion_tokens`
+> - **Metrics show**: Average token counts
+> - **Traces show**: Exact token usage for cost attribution to this user/application
+>
+> **The Key Difference:**
+> - **Metrics answer**: 'What is our p95 latency?' (aggregate statistics)
+> - **Traces answer**: 'Why was this request slow? What path did it take? What decisions were made?' (individual behavior and causality)
+>
+> For complex distributed systems like P/D disaggregation, you need **both**: metrics for monitoring overall health, and traces for understanding individual request behavior, debugging anomalies, and optimizing decision logic."
+
+*[Click through spans to show attributes and parent-child relationships]*
 
 ---
 
 ## 6. Network Transfer Overhead (30 seconds)
 
 **SAY:**
-> "Notice our KV transfer overhead is in the 5-20ms range. This deployment uses **TCP networking** for KV cache transfer via NIXL.
+> "Notice our KV transfer overhead is in the 5-20ms range. This demo deployment uses **TCP networking** for KV cache transfer via NIXL - **we're not using RDMA**.
 >
 > In production deployments with **RDMA (RoCE with GPUDirect)**, this overhead would drop to 2-8ms - about 2-3x lower. RDMA allows GPUs to transfer data directly without CPU involvement, making P/D disaggregation much more efficient.
 >
-> The tracing data lets us **quantify exactly how much RDMA would improve performance** - this is invaluable for infrastructure planning and optimization decisions."
+> The coordinator metrics let us **quantify exactly how much RDMA would improve performance** - this is invaluable for infrastructure planning and optimization decisions."
 
 ---
 
@@ -213,38 +233,36 @@ cd /path/to/llm-d
 > - Success rate: [read from output]
 > - Expected trace spans created across all components
 >
-> All of this trace data is now queryable in Grafana with **100% sampling for this demo**. In production, we'd use 10% sampling to reduce overhead while maintaining observability."
+> All of this trace data is now available in the OpenShift distributed tracing console with **100% sampling for this demo**. The metrics are aggregated in Prometheus and visualized in the Grafana dashboard. In production, we'd use 10% trace sampling to reduce overhead while maintaining observability."
 
 ---
 
 ## 9. Closing: Why This Matters (1 minute)
 
 **SAY:**
-> "To summarize, distributed tracing with P/D coordinator metrics provides five critical capabilities:
+> "To summarize, combining metrics and distributed tracing provides comprehensive observability for P/D disaggregation:
 >
-> **1. True Performance Visibility**
-> - Real TTFT measurements, not misleading vLLM instance metrics
-> - Coordinator-level view that matches client experience
+> **Metrics (Dashboard) Give You:**
+> - **Aggregate performance**: p50, p95, p99 latencies across all requests
+> - **Trend analysis**: How performance evolves over time
+> - **System health**: Overall throughput and error rates
+> - **Component breakdown**: Average time in prefill, decode, KV transfer
 >
-> **2. Optimization Guidance**
-> - Component breakdown shows exactly where to tune: prefill workers, decode TP, RDMA networking
-> - Validates whether xPyD ratios are optimal for your workload
+> **Tracing (Individual Spans) Gives You:**
+> - **Request-level intelligence**: Why specific requests behaved differently
+> - **Decision context**: What routing/scheduling decisions were made and why
+> - **Causal relationships**: The exact sequence and parent-child flow of operations
+> - **Root cause analysis**: Drill into problematic requests to find exact failure points
+> - **Cost attribution**: Token usage for per-request chargeback
 >
-> **3. Decision Intelligence**
-> - Understand when and why P/D disaggregation is used vs skipped
-> - Tune selective P/D thresholds based on actual request characteristics
+> **Why You Need Both:**
+> - Metrics tell you **'what'** is happening (we're seeing high p95 latency)
+> - Traces tell you **'why'** it's happening (these requests are slow because cache misses trigger full prefill)
+> - Together, they enable both **monitoring** (aggregate health) and **debugging** (individual behavior)
 >
-> **4. Cost Attribution**
-> - Token usage tracking for per-request, per-application, per-model cost analysis
-> - Essential for chargeback and budget optimization
+> **For complex distributed architectures like P/D disaggregation, this combination isn't optional - it's essential infrastructure for operating at scale.**
 >
-> **5. Root Cause Analysis**
-> - End-to-end traces for debugging latency issues across distributed components
-> - Error attribution showing exact failure points
->
-> **For complex distributed architectures like P/D disaggregation, tracing isn't optional - it's essential infrastructure for operating at scale.**
->
-> This demo used a 4-GPU, 8B model setup. Production 70B deployments would show the same architecture pattern at larger scale: 4 prefill workers and TP=4 decode, with TTFT in the 50-300ms range and KV transfer overhead of 10-50ms. **The observability problem we're solving is identical** - without coordinator-level metrics, you cannot optimize P/D disaggregation regardless of scale."
+> This demo used a 4-GPU, 8B model setup with TCP networking. Production 70B deployments would show the same architecture pattern at larger scale: 4 prefill workers and TP=4 decode with RDMA networking, achieving TTFT in the 50-300ms range and KV transfer overhead of 10-50ms (2-8ms with RDMA). **The observability problem we're solving is identical** - without both coordinator-level metrics and distributed traces, you cannot effectively optimize P/D disaggregation regardless of scale."
 
 ---
 
@@ -267,30 +285,18 @@ kubectl get pods -n ${NAMESPACE} -w
 ./docs/monitoring/scripts/generate-load-pd-concurrent.sh 6 5
 ```
 
-### Grafana Access
+### Observability Access
 ```bash
-# Dashboard URL
+# Metrics Dashboard (Grafana)
 http://localhost:3000/d/pd-coordinator-metrics
 
-# Tempo Explore for traces
-http://localhost:3000/explore
-```
-
-### Useful TraceQL Queries
-```
-# All P/D requests
-{resource.service.name="llm-d-pd-proxy" && name="llm_d.pd_proxy.decode"}
-
-# Requests with high KV transfer overhead
-{resource.service.name="llm-d-pd-proxy" && name="llm_d.pd_proxy.decode"}
-| select(span.llm_d.pd_proxy.kv_transfer_overhead_ms)
-| span.llm_d.pd_proxy.kv_transfer_overhead_ms > 10
-
-# Profile handler decisions
-{resource.service.name="llm-d-inference-scheduler" && name="llm_d.epp.profile_handler.pick"}
-
-# Gateway requests
-{resource.service.name="gateway-api-inference-extension" && name="gateway.request"}
+# Distributed Traces (OpenShift Console)
+# Navigate to: Observe → Traces
+# Look for spans from:
+# - llm-d-pd-proxy (coordinator spans)
+# - llm-d-inference-scheduler (EPP/routing spans)
+# - gateway-api-inference-extension (gateway spans)
+# - vLLM instances (inference spans)
 ```
 
 ---
@@ -299,9 +305,9 @@ http://localhost:3000/explore
 
 **Architecture**: 4 GPUs (2 Prefill + 1 Decode with TP=2)
 - Model: `meta-llama/Llama-3.1-8B-Instruct`
-- Prefill: 2 replicas, TP=1, 1 GPU each
-- Decode: 1 replica, TP=2, 2 GPUs
-- Networking: TCP via NIXL connector
+- Prefill: 2 replicas, TP=1 (Tensor Parallelism = 1), 1 GPU each
+- Decode: 1 replica, TP=2 (model split across 2 GPUs)
+- Networking: TCP via NIXL connector (not using RDMA)
 - Tracing: OpenTelemetry with 100% sampling (demo mode)
 
 **Key Files**:
@@ -314,7 +320,7 @@ http://localhost:3000/explore
 
 ## Troubleshooting
 
-### No traces showing up
+### No traces showing up in OpenShift Console
 ```bash
 # Check OpenTelemetry collector is running
 kubectl get pods -n observability-hub | grep collector
@@ -324,6 +330,9 @@ kubectl get cm -n ${NAMESPACE} -o yaml | grep -A10 OTEL
 
 # Check vLLM tracing enabled
 kubectl logs -n ${NAMESPACE} -l role=decode | grep -i "otlp\|tracing"
+
+# Verify traces are being sent (check collector logs)
+kubectl logs -n observability-hub -l app=opentelemetry-collector
 ```
 
 ### Load generation fails
@@ -338,15 +347,18 @@ kubectl get pods -n ${NAMESPACE}
 # Script will show HTTP status codes for failures
 ```
 
-### Dashboard shows no data
+### Metrics dashboard shows no data
 ```bash
-# Verify Tempo is receiving traces
-kubectl logs -n observability-hub -l app=tempo
+# Verify Prometheus is scraping metrics
+kubectl logs -n observability-hub -l app=prometheus
+
+# Check that metrics are being exported
+kubectl exec -n ${NAMESPACE} <pod-name> -- curl localhost:8000/metrics | grep llm_d_inference_scheduler
 
 # Check time range in Grafana (top right)
 # Ensure it covers when load generation ran
 
-# Verify TraceQL query syntax in dashboard panels
+# Verify Prometheus queries in dashboard panels match metric names
 ```
 
 ---
