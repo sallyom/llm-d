@@ -5,9 +5,9 @@
 
 set -e
 
-ENDPOINT="http://localhost:8000/v1"
+ENDPOINT="${ENDPOINT:-http://localhost:8000/v1}"
 DURATION_MINUTES=${1:-5}
-MODEL_NAME="Qwen/Qwen3-0.6B"
+MODEL_NAME="${MODEL_NAME:-meta-llama/Llama-3.1-8B-Instruct}"
 
 echo "Load Generator with Error Generation"
 echo "==================================="
@@ -39,7 +39,7 @@ send_request() {
         -d "{
             \"model\": \"$MODEL_NAME\",
             \"messages\": [
-                {\"role\": \"user\", \"content\": \"$prompt\"}
+                {\"role\": \"user\", \"content\": $(echo "$prompt" | jq -Rs .)}
             ],
             \"max_tokens\": 50,
             \"temperature\": 0.7,
@@ -79,19 +79,19 @@ send_malformed_request() {
                 -d "{
                     \"model\": \"nonexistent-model-123\",
                     \"messages\": [
-                        {\"role\": \"user\", \"content\": \"Hello\"}
+                        {\"role\": \"user\", \"content\": $(echo "Hello" | jq -Rs .)}
                     ],
                     \"max_tokens\": 50
                 }")
             ;;
         "malformed_json")
-            # Invalid JSON syntax
+            # Invalid JSON syntax (intentionally malformed - missing closing brace)
             response=$(curl -s -X POST "$ENDPOINT/chat/completions" \
                 -H "Content-Type: application/json" \
                 -d "{
                     \"model\": \"$MODEL_NAME\",
                     \"messages\": [
-                        {\"role\": \"user\", \"content\": \"Hello\"
+                        {\"role\": \"user\", \"content\": $(echo "Hello" | jq -Rs .)
                     ],
                     \"max_tokens\": 50
                 }" 2>&1)
@@ -112,7 +112,7 @@ send_malformed_request() {
                 -d "{
                     \"model\": \"$MODEL_NAME\",
                     \"messages\": [
-                        {\"role\": \"user\", \"content\": \"Hello\"}
+                        {\"role\": \"user\", \"content\": $(echo "Hello" | jq -Rs .)}
                     ],
                     \"max_tokens\": 50,
                     \"temperature\": 5.0
@@ -125,7 +125,7 @@ send_malformed_request() {
                 -d "{
                     \"model\": \"$MODEL_NAME\",
                     \"messages\": [
-                        {\"role\": \"user\", \"content\": \"Hello\"}
+                        {\"role\": \"user\", \"content\": $(echo "Hello" | jq -Rs .)}
                     ],
                     \"max_tokens\": -10
                 }")
@@ -137,7 +137,7 @@ send_malformed_request() {
                 -d "{
                     \"model\": \"$MODEL_NAME\",
                     \"messages\": [
-                        {\"role\": \"user\", \"content\": \"Hello\"}
+                        {\"role\": \"user\", \"content\": $(echo "Hello" | jq -Rs .)}
                     ]
                 }")
             ;;
@@ -147,7 +147,7 @@ send_malformed_request() {
                 -d "{
                     \"model\": \"$MODEL_NAME\",
                     \"messages\": [
-                        {\"role\": \"user\", \"content\": \"Hello\"}
+                        {\"role\": \"user\", \"content\": $(echo "Hello" | jq -Rs .)}
                     ],
                     \"max_tokens\": 50
                 }")
