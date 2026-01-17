@@ -230,14 +230,26 @@ medium_prompts=(
 )
 
 # Long prompts - guaranteed to trigger P/D disaggregation and test KV cache transfer
+# These prompts are specifically designed to:
+# 1. Exceed the P/D threshold to ensure prefill/decode disaggregation
+# 2. Generate substantial KV cache data that will be transferred via NIXL connector
+# 3. Trigger vllm:nixl_* metrics (transfer time, bytes transferred, descriptors)
 long_prompts=(
     "I need a comprehensive explanation of how large language models work, including the architecture, training process, inference optimization techniques like KV cache, prefix caching, and disaggregated serving. Please cover the mathematical foundations, attention mechanisms, and practical deployment considerations for production systems at scale."
     "Write a detailed technical analysis of Kubernetes scheduling mechanisms, including the default scheduler, custom schedulers, admission controllers, and how they interact with different workload types. Discuss performance implications, best practices for high-scale deployments, and optimization strategies for GPU workloads."
     "Explain the concept of distributed tracing in microservices architectures. Cover OpenTelemetry, trace context propagation, sampling strategies, span hierarchies, and how to use tracing data to optimize performance in complex distributed systems with multiple components and services."
 )
 
+# Extra long prompts - specifically for maximizing KV cache transfer overhead testing
+# These will generate the largest KV cache transfers and populate NIXL metrics
+kv_transfer_heavy_prompts=(
+    "Provide an extensive technical deep-dive into neural network architectures used for natural language processing. Start with the fundamentals of word embeddings, move through recurrent neural networks including LSTMs and GRUs, then explain the transformer architecture in detail covering multi-head attention, positional encodings, layer normalization, and feed-forward networks. Discuss training techniques including gradient descent variants, learning rate schedules, regularization methods like dropout and weight decay. Cover advanced topics such as knowledge distillation, quantization, pruning, and efficient inference techniques. Include mathematical formulations where appropriate and explain the computational complexity of different components."
+    "Write a comprehensive guide to building production-ready distributed systems. Cover system design principles including scalability, reliability, availability, maintainability, and fault tolerance. Explain distributed consensus algorithms like Paxos and Raft in detail. Discuss data partitioning and replication strategies, eventual consistency versus strong consistency, CAP theorem implications, and practical trade-offs. Cover load balancing techniques, circuit breakers, retry policies with exponential backoff, rate limiting, and service mesh patterns. Include real-world examples of handling cascading failures, implementing graceful degradation, and maintaining system observability through metrics, logging, and distributed tracing."
+    "Explain the complete lifecycle of a machine learning project from problem formulation to production deployment and monitoring. Cover data collection, cleaning, and preprocessing techniques. Discuss feature engineering approaches, dimensionality reduction methods like PCA and t-SNE, and feature selection strategies. Explain model selection criteria, cross-validation techniques, hyperparameter tuning using grid search and Bayesian optimization. Cover evaluation metrics for classification and regression tasks, handling imbalanced datasets, and interpreting model predictions using techniques like SHAP and LIME. Discuss deployment strategies including batch inference, online serving, model versioning, A/B testing, and monitoring for data drift and model degradation."
+)
+
 # Combine all prompts for variety
-all_prompts=("${short_prompts[@]}" "${medium_prompts[@]}" "${long_prompts[@]}")
+all_prompts=("${short_prompts[@]}" "${medium_prompts[@]}" "${long_prompts[@]}" "${kv_transfer_heavy_prompts[@]}")
 
 # Error types to cycle through
 # NOTE: "invalid_model" is commented out because it causes hangs with
@@ -283,8 +295,9 @@ echo ""
 while [ $(date +%s) -lt $end_time ]; do
     request_count=$((request_count + 1))
 
-    # Request pattern to maximize P/D tracing coverage:
-    # - 60% normal requests with varying lengths (trigger P/D spans)
+    # Request pattern to maximize P/D tracing coverage and KV cache transfer metrics:
+    # - 30% KV-heavy requests (maximize NIXL transfer metrics: vllm:nixl_*)
+    # - 30% long prompts (guaranteed P/D + KV transfer)
     # - 20% streaming requests (test streaming with P/D)
     # - 10% varied token lengths (test different decode durations)
     # - 10% error requests (maintain error tracking)
@@ -310,22 +323,30 @@ while [ $(date +%s) -lt $end_time ]; do
         prompt="${long_prompts[$prompt_index]}"
         send_request "$request_count" "$prompt" 200 false 0.7
 
+    elif [ $request_type -eq 0 ] || [ $request_type -eq 4 ] || [ $request_type -eq 5 ]; then
+        # 30% KV cache transfer heavy requests - maximize NIXL metrics
+        # These extra-long prompts will generate substantial KV cache data
+        # and populate vllm:nixl_xfer_time_seconds, vllm:nixl_bytes_transferred, etc.
+        prompt_index=$(( request_count % ${#kv_transfer_heavy_prompts[@]} ))
+        prompt="${kv_transfer_heavy_prompts[$prompt_index]}"
+        send_request "$request_count" "$prompt" 150 false 0.7
+
     elif [ $request_type -eq 1 ] || [ $request_type -eq 2 ]; then
-        # Focus on long prompts to ensure P/D disaggregation is triggered
+        # 20% regular long prompts to ensure P/D disaggregation is triggered
         prompt_index=$(( request_count % ${#long_prompts[@]} ))
         prompt="${long_prompts[$prompt_index]}"
         send_request "$request_count" "$prompt" 50 false 0.7
 
     elif [ $request_type -eq 3 ]; then
-        # Test short prompts - may bypass P/D if selective threshold is set
-        prompt_index=$(( request_count % ${#short_prompts[@]} ))
-        prompt="${short_prompts[$prompt_index]}"
-        send_request "$request_count" "$prompt" 30 false 0.7
-
-    else
-        # Medium prompts - balanced workload
+        # 10% medium prompts - balanced workload
         prompt_index=$(( request_count % ${#medium_prompts[@]} ))
         prompt="${medium_prompts[$prompt_index]}"
+        send_request "$request_count" "$prompt" 50 false 0.7
+
+    else
+        # Fallback to varied prompts
+        prompt_index=$(( request_count % ${#all_prompts[@]} ))
+        prompt="${all_prompts[$prompt_index]}"
         send_request "$request_count" "$prompt" 50 false 0.7
     fi
 
@@ -350,13 +371,20 @@ echo "========================="
 echo "Total requests sent: $request_count"
 echo "Error requests sent: $error_count"
 echo ""
-echo "Request Distribution (for P/D Tracing):"
+echo "Request Distribution (for P/D Tracing & KV Cache Transfer Metrics):"
+echo "  - KV-heavy prompts: ~30% (maximize NIXL transfer metrics)"
 echo "  - Long prompts: ~20% (guaranteed P/D disaggregation)"
-echo "  - Medium prompts: ~40% (likely P/D disaggregation)"
-echo "  - Short prompts: ~10% (may bypass P/D if selective threshold set)"
+echo "  - Medium prompts: ~10% (balanced workload)"
 echo "  - Streaming: ~20% (P/D with streaming)"
 echo "  - High token decode: ~10% (extended decode duration)"
 echo "  - Errors: ~10%"
+echo ""
+echo "Expected NIXL KV Cache Transfer Metrics:"
+echo "  - vllm:nixl_xfer_time_seconds: Transfer duration histograms"
+echo "  - vllm:nixl_post_time_seconds: Post-transfer operation time"
+echo "  - vllm:nixl_bytes_transferred: Bytes per transfer"
+echo "  - vllm:nixl_num_descriptors: NIXL descriptors used"
+echo "  - vllm:nixl_num_failed_transfers: Failed transfer counter"
 echo ""
 echo "Expected Trace Spans Generated:"
 echo "  - llm_d.pd_proxy.request: $request_count (all requests)"

@@ -14,7 +14,7 @@
 #
 # EXPECTED OUTCOMES IN GRAFANA:
 # - True TTFT (coordinator) will be noticeably higher than vLLM TTFT (decode)
-# - KV transfer overhead visible with concurrent long prompts
+# - P/D coordination overhead visible with concurrent long prompts
 # - Prefill vs Decode duration comparison shows stage separation
 # - Different ISL/OSL patterns show when P/D is most beneficial
 
@@ -69,7 +69,7 @@ echo "Duration:     $DURATION_MINUTES minutes"
 echo ""
 echo "This script creates sustained concurrent load to showcase:"
 echo "  ✓ True TTFT vs vLLM TTFT gap (coordinator view vs instance)"
-echo "  ✓ Prefill/Decode stage separation and KV transfer overhead"
+echo "  ✓ Prefill/Decode stage separation and P/D coordination overhead"
 echo "  ✓ Impact of varied ISL/OSL ratios on P/D performance"
 echo "  ✓ Queueing behavior under concurrent load"
 echo ""
@@ -170,7 +170,7 @@ worker_load_generator() {
         # Select prompt and parameters based on pattern
         case $pattern in
             "long_isl_short_osl")
-                # Long prompts, short outputs - highlights prefill stage and KV transfer
+                # Long prompts, short outputs - highlights prefill stage and P/D coordination overhead
                 # This pattern shows maximum True TTFT vs vLLM TTFT gap
                 if [ $((request_count % 3)) -eq 0 ]; then
                     idx=$(( RANDOM % ${#VERY_LONG_PROMPTS[@]} ))
@@ -350,7 +350,7 @@ echo "   http://localhost:3000/d/pd-coordinator-metrics"
 echo ""
 echo "2. Check key metrics in dashboard:"
 echo "   • True TTFT (Coordinator) - should be higher than vLLM TTFT"
-echo "   • KV Transfer Overhead - visible latency between prefill and decode"
+echo "   • Coordinator Overhead - P/D coordination overhead (sidecar processing)"
 echo "   • Prefill vs Decode Duration - shows stage separation"
 echo "   • Total Request Duration - end-to-end client experience"
 echo ""

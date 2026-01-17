@@ -969,9 +969,10 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "sum(rate(vllm:nixl_xfer_time_seconds_sum[5m])) / sum(rate(vllm:nixl_xfer_time_seconds_count[5m])) * 1000",
+          "expr": "sum(rate(vllm:nixl_xfer_time_seconds_sum[$__rate_interval])) / sum(rate(vllm:nixl_xfer_time_seconds_count[$__rate_interval])) * 1000",
           "refId": "A",
-          "legendFormat": "Avg Transfer Time"
+          "legendFormat": "Avg Transfer Time",
+          "instant": false
         }
       ],
       "title": "Avg KV Transfer Time",
@@ -1042,9 +1043,10 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "sum(rate(vllm:nixl_bytes_transferred_sum[5m])) / sum(rate(vllm:nixl_bytes_transferred_count[5m])) / 1048576",
+          "expr": "sum(rate(vllm:nixl_bytes_transferred_sum[$__rate_interval])) / sum(rate(vllm:nixl_bytes_transferred_count[$__rate_interval])) / 1048576",
           "refId": "A",
-          "legendFormat": "Avg MB Transferred"
+          "legendFormat": "Avg MB Transferred",
+          "instant": false
         }
       ],
       "title": "Avg MB per Transfer",
@@ -1115,9 +1117,10 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "sum(vllm:nixl_xfer_time_seconds_count)",
+          "expr": "sum(increase(vllm:nixl_xfer_time_seconds_count[$__range]))",
           "refId": "A",
-          "legendFormat": "Total Transfers"
+          "legendFormat": "Total Transfers",
+          "instant": false
         }
       ],
       "title": "Total KV Transfers",
@@ -1196,9 +1199,10 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "sum(vllm:nixl_num_failed_transfers)",
+          "expr": "sum(vllm:nixl_num_failed_transfers) or vector(0)",
           "refId": "A",
-          "legendFormat": "Failed Transfers"
+          "legendFormat": "Failed Transfers",
+          "instant": false
         }
       ],
       "title": "Failed KV Transfers",
@@ -1258,7 +1262,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "histogram_quantile(0.5, sum by (le) (rate(vllm:nixl_xfer_time_seconds_bucket[5m]))) * 1000",
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(vllm:nixl_xfer_time_seconds_bucket[$__rate_interval]))) * 1000",
           "refId": "A",
           "legendFormat": "p50"
         },
@@ -1267,7 +1271,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(vllm:nixl_xfer_time_seconds_bucket[5m]))) * 1000",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(vllm:nixl_xfer_time_seconds_bucket[$__rate_interval]))) * 1000",
           "refId": "B",
           "legendFormat": "p95"
         },
@@ -1276,7 +1280,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(vllm:nixl_xfer_time_seconds_bucket[5m]))) * 1000",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(vllm:nixl_xfer_time_seconds_bucket[$__rate_interval]))) * 1000",
           "refId": "C",
           "legendFormat": "p99"
         }
@@ -1338,7 +1342,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "histogram_quantile(0.5, sum by (le) (rate(vllm:nixl_post_time_seconds_bucket[5m]))) * 1000",
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(vllm:nixl_post_time_seconds_bucket[$__rate_interval]))) * 1000",
           "refId": "A",
           "legendFormat": "p50"
         },
@@ -1347,7 +1351,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(vllm:nixl_post_time_seconds_bucket[5m]))) * 1000",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(vllm:nixl_post_time_seconds_bucket[$__rate_interval]))) * 1000",
           "refId": "B",
           "legendFormat": "p95"
         },
@@ -1356,7 +1360,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(vllm:nixl_post_time_seconds_bucket[5m]))) * 1000",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(vllm:nixl_post_time_seconds_bucket[$__rate_interval]))) * 1000",
           "refId": "C",
           "legendFormat": "p99"
         }
@@ -1418,7 +1422,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "histogram_quantile(0.5, sum by (le) (rate(vllm:nixl_bytes_transferred_bucket[5m]))) / 1048576",
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(vllm:nixl_bytes_transferred_bucket[$__rate_interval]))) / 1048576",
           "refId": "A",
           "legendFormat": "p50"
         },
@@ -1427,7 +1431,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(vllm:nixl_bytes_transferred_bucket[5m]))) / 1048576",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(vllm:nixl_bytes_transferred_bucket[$__rate_interval]))) / 1048576",
           "refId": "B",
           "legendFormat": "p95"
         },
@@ -1436,7 +1440,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(vllm:nixl_bytes_transferred_bucket[5m]))) / 1048576",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(vllm:nixl_bytes_transferred_bucket[$__rate_interval]))) / 1048576",
           "refId": "C",
           "legendFormat": "p99"
         }
@@ -1498,7 +1502,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "histogram_quantile(0.5, sum by (le) (rate(vllm:nixl_num_descriptors_bucket[5m])))",
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(vllm:nixl_num_descriptors_bucket[$__rate_interval])))",
           "refId": "A",
           "legendFormat": "p50"
         },
@@ -1507,7 +1511,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(vllm:nixl_num_descriptors_bucket[5m])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(vllm:nixl_num_descriptors_bucket[$__rate_interval])))",
           "refId": "B",
           "legendFormat": "p95"
         },
@@ -1516,7 +1520,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(vllm:nixl_num_descriptors_bucket[5m])))",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(vllm:nixl_num_descriptors_bucket[$__rate_interval])))",
           "refId": "C",
           "legendFormat": "p99"
         }
