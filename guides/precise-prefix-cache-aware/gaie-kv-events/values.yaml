@@ -1,23 +1,9 @@
 inferenceExtension:
   replicas: 1
-  flags:
-    # in vLLM 10.0+, the metric is renamed while upstream GAIE is still using the old name as default.
-    # See https://github.com/kubernetes-sigs/gateway-api-inference-extension/pull/1905.
-    kv-cache-usage-percentage-metric: "vllm:kv_cache_usage_perc"
-    v: 4 # log verbosity
   image:
-    # both downstream infernece-scheduler and upstream epp images can support precise KV Cache awareness based on the configurations here
-    ###################
     name: llm-d-inference-scheduler
-    #hub: ghcr.io/llm-d
-    #tag: v0.4.0
     hub: quay.io/sallyom
-    tag: tracing
-    ###################
-    # name: epp
-    # hub: registry.k8s.io/gateway-api-inference-extension
-    # tag: v1.2.0
-    ###################
+    tag: tracing-and-pd-metrics
     pullPolicy: Always
   extProcPort: 9002
   # ZMQ port for `kvevents.Pool` (KVEvents subscriber)
@@ -38,7 +24,9 @@ inferenceExtension:
           name: llm-d-hf-token
           key: HF_TOKEN
   flags:
-    # Log verbosity
+    # in vLLM 10.0+, the metric is renamed while upstream GAIE is still using the old name as default.
+    # See https://github.com/kubernetes-sigs/gateway-api-inference-extension/pull/1905.
+    kv-cache-usage-percentage-metric: "vllm:kv_cache_usage_perc"
     v: 4
 
   pluginsConfigFile: "precise-prefix-cache-config.yaml"

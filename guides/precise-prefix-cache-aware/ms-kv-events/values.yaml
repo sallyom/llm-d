@@ -1,23 +1,25 @@
 multinode: false
 
 modelArtifacts:
-  uri: "hf://Qwen/Qwen3-0.6B"
+  uri: "hf://meta-llama/Llama-3.1-8B-Instruct"
   size: 20Gi
   authSecretName: "llm-d-hf-token"
-  name: "Qwen/Qwen3-0.6B"
+  name: "meta-llama/Llama-3.1-8B-Instruct"
+  #uri: "hf://Qwen/Qwen3-0.6B"
+  #size: 20Gi
+  #authSecretName: "llm-d-hf-token"
+  #name: "Qwen/Qwen3-0.6B"
 
 routing:
   servicePort: 8000
   proxy:
-    #image: ghcr.io/llm-d/llm-d-routing-sidecar:v0.4.0-rc.1
-    image: quay.io/sallyom/llm-d-routing-sidecar:tracing
+    image: quay.io/sallyom/llm-d-routing-sidecar:tracing-and-pd-metrics
     connector: nixlv2
     secure: false
     # OpenTelemetry distributed tracing configuration for P/D sidecar
-    # Uncomment to enable tracing
     env:
       - name: OTEL_SERVICE_NAME
-        value: "pd-sidecar"
+        value: "llm-d-pd-proxy"
       - name: OTEL_EXPORTER_OTLP_ENDPOINT
         value: "http://llm-d-collector-collector.observability-hub.svc.cluster.local:4317"
       - name: OTEL_TRACES_EXPORTER
@@ -25,29 +27,10 @@ routing:
       - name: OTEL_TRACES_SAMPLER
         value: "parentbased_traceidratio"
       - name: OTEL_TRACES_SAMPLER_ARG
-        value: "1.0"
-      # Kubernetes resource attributes
-      - name: OTEL_RESOURCE_ATTRIBUTES_NODE_NAME
-        valueFrom:
-          fieldRef:
-            apiVersion: v1
-            fieldPath: spec.nodeName
-      - name: OTEL_RESOURCE_ATTRIBUTES_POD_NAME
-        valueFrom:
-          fieldRef:
-            apiVersion: v1
-            fieldPath: metadata.name
-      - name: OTEL_RESOURCE_ATTRIBUTES_NAMESPACE
-        valueFrom:
-          fieldRef:
-            apiVersion: v1
-            fieldPath: metadata.namespace
-      - name: OTEL_RESOURCE_ATTRIBUTES
-        value: 'k8s.namespace.name=$(OTEL_RESOURCE_ATTRIBUTES_NAMESPACE),k8s.node.name=$(OTEL_RESOURCE_ATTRIBUTES_NODE_NAME),k8s.pod.name=$(OTEL_RESOURCE_ATTRIBUTES_POD_NAME)'
-
+        value: "1.0"  # 100% sampling for demo (production: 0.1 = 10%)
 decode:
   create: true
-  replicas: 2
+  replicas: 4  # Use all 4 GPUs
   monitoring:
     podmonitor:
       enabled: true
@@ -65,13 +48,14 @@ decode:
       - '-c'
     args:
       - |
-        vllm serve Qwen/Qwen3-0.6B \
+        vllm serve meta-llama/Llama-3.1-8B-Instruct \
         --host 0.0.0.0 \
         --port 8200 \
         --block-size 64 \
         --prefix-caching-hash-algo sha256_cbor \
         --kv-transfer-config '{"kv_connector":"NixlConnector", "kv_role":"kv_both"}' \
-        --kv-events-config "{\"enable_kv_cache_events\":true,\"publisher\":\"zmq\",\"endpoint\":\"tcp://gaie-${GAIE_RELEASE_NAME_POSTFIX}-epp.${NAMESPACE}.svc.cluster.local:5557\",\"topic\":\"kv@${POD_IP}@Qwen/Qwen3-0.6B\"}" \
+        --kv-events-config "{\"enable_kv_cache_events\":true,\"publisher\":\"zmq\",\"endpoint\":\"tcp://gaie-${GAIE_RELEASE_NAME_POSTFIX}-epp.${NAMESPACE}.svc.cluster.local:5557\",\"topic\":\"kv@${POD_IP}@meta-llama/Llama-3.1-8B-Instruct\"}" \
+        --collect-detailed-traces all \
         --otlp-traces-endpoint "http://llm-d-collector-collector.observability-hub.svc.cluster.local:4317"
     env:
       - name: GAIE_RELEASE_NAME_POSTFIX # index 0 matters because of set in helmfile
@@ -88,8 +72,6 @@ decode:
           fieldRef:
             apiVersion: v1
             fieldPath: status.podIP
-      - name: CUDA_VISIBLE_DEVICES
-        value: "0"
       - name: UCX_TLS
         value: "cuda_ipc,cuda_copy,tcp"
       - name: VLLM_NIXL_SIDE_CHANNEL_HOST

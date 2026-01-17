@@ -52,15 +52,19 @@ cache lookups, model execution—to provide deep, end-to-end observability with 
 
 ### Key Observability Capabilities
 
-This instrumentation enables the following critical insights for llm-d distributed inference:
+This instrumentation enables the following important insights for llm-d distributed inference:
 
 #### 1. True End-to-End Latency in P/D Disaggregation Mode
 
 **Problem**: vLLM instances in P/D mode report misleading TTFT metrics—the prefiller doesn't include KV cache transfer time,
 and the decoder reports artificially low TTFT since KV cache is pre-transferred.
 
-**Solution**: P/D sidecar coordinator metrics (`llm_d.pd_proxy.true_ttft_ms`, `total_duration_ms`, `kv_transfer_overhead_ms`)
-capture real client-experienced latency including gateway routing, scheduling, prefill, and KV transfer coordination overhead.
+**Solution**: P/D sidecar coordinator metrics (`llm_d.pd_proxy.true_ttft_ms`, `total_duration_ms`, `coordinator_overhead_ms`)
+capture real client-experienced latency including gateway routing, scheduling, prefill, and sidecar coordination overhead.
+
+**Important Distinction**:
+- `coordinator_overhead_ms` measures **sidecar processing** (JSON parsing, parameter extraction) between prefill HTTP response and decode HTTP request
+- **Actual KV cache transfer** happens **inside vLLM** during decode execution and is included in `decode_duration_ms`, not in coordinator overhead
 
 #### 2. KV Cache-Aware Routing Effectiveness
 
@@ -88,7 +92,7 @@ capture real client-experienced latency including gateway routing, scheduling, p
 
 **Insights**:
 - Component-level latency breakdown to identify whether slowness is in scheduling, cache lookup, prefill, decode, or coordination
-- Critical path analysis showing where time is actually spent in complex multi-hop requests
+- End-to-end analysis showing where time is actually spent in complex multi-hop requests
 - Comparison of P/D coordination overhead vs monolithic inference for different request patterns
 
 #### 5. Error Attribution and Root Cause Analysis
@@ -170,7 +174,7 @@ The implementation uses **manual OpenTelemetry instrumentation** across llm-d co
 - Gateway provides single entry span that wraps all request processing
 - EPP plugins (from llm-d-inference-scheduler) execute within the gateway process and create child spans
 - Simplified approach compared to instrumenting individual gateway internal operations
-- Focus on plugin-level visibility where critical scheduling and routing decisions occur
+- Focus on plugin-level visibility where scheduling and routing decisions occur
 
 #### **EPP Plugins (llm-d-inference-scheduler)**
 
@@ -233,10 +237,10 @@ Located in llm-d-inference-scheduler repository under `pkg/sidecar/proxy/` with 
   - Error tracking: Records SSRF protection denials
   - **End-to-End P/D Metrics** (added to solve TTFT/TPOT measurement issues in P/D mode):
     - `llm_d.pd_proxy.total_duration_ms`: Total request duration from sidecar entry to completion (ms)
-    - `llm_d.pd_proxy.true_ttft_ms`: True Time to First Token from client perspective (includes prefill + coordination overhead)
-    - `llm_d.pd_proxy.prefill_duration_ms`: Prefill stage duration (ms)
-    - `llm_d.pd_proxy.decode_duration_ms`: Decode stage duration (ms)
-    - `llm_d.pd_proxy.kv_transfer_overhead_ms`: Coordination overhead between prefill and decode stages (ms)
+    - `llm_d.pd_proxy.true_ttft_ms`: True Time to First Token from client perspective (includes prefill + coordinator overhead)
+    - `llm_d.pd_proxy.prefill_duration_ms`: Prefill stage HTTP round-trip duration (ms)
+    - `llm_d.pd_proxy.decode_duration_ms`: Decode stage HTTP round-trip duration (ms) - includes KV cache transfer inside vLLM
+    - `llm_d.pd_proxy.coordinator_overhead_ms`: Sidecar coordination overhead (JSON processing only, excludes KV cache transfer which happens inside vLLM) (ms)
     - `llm_d.pd_proxy.concurrent_pd`: Boolean flag (SGLang only) indicating concurrent prefill/decode execution
 
 - `llm_d.pd_proxy.prefill`: Prefill stage processing (INTERNAL span)
@@ -263,9 +267,9 @@ The end-to-end P/D metrics address an observability gap: vLLM instances in P/D m
 - **Neither instance** captures the true end-to-end latency experienced by the client
 
 The sidecar, acting as the P/D coordinator, has visibility into both stages and can calculate the "true" metrics:
-- `true_ttft_ms`: Time from request arrival to when decoder can start generating (prefill + coordination)
+- `true_ttft_ms`: Time from request arrival to when decoder can start generating (prefill + coordinator overhead)
 - `total_duration_ms`: Complete request latency from sidecar entry to response completion
-- `kv_transfer_overhead_ms`: Coordination overhead between prefill completion and decode start
+- `coordinator_overhead_ms`: Sidecar coordination overhead (JSON parsing, parameter extraction) between prefill HTTP completion and decode HTTP start
 
 These coordinator-level metrics should be used instead of per-instance vLLM metrics for accurate P/D performance analysis.
 
@@ -331,7 +335,7 @@ gateway.request (2150ms) [gateway-api-inference-extension]
 │   └── Sets prefill pod headers for P/D proxy
 │
 └── llm_d.pd_proxy.request (2105ms) [llm-d-pd-proxy]
-    ├── Coordinator Metrics: true_ttft_ms=55, total_duration_ms=2105, kv_transfer_overhead_ms=0.5
+    ├── Coordinator Metrics: true_ttft_ms=55, total_duration_ms=2105, coordinator_overhead_ms=0.5
     │
     ├── llm_d.pd_proxy.prefill (55ms)
     │   └── vllm:llm_request (50ms) [vllm-prefill-pod]
@@ -340,7 +344,8 @@ gateway.request (2150ms) [gateway-api-inference-extension]
     └── llm_d.pd_proxy.decode (2050ms)
         └── vllm:llm_request (2045ms) [vllm-decode-pod]
             └── Attributes: gen_ai.usage.prompt_tokens=128, completion_tokens=512,
-                           gen_ai.latency.time_to_first_token=0.015s (using transferred KV)
+                           gen_ai.latency.time_to_first_token=0.015s (using transferred KV),
+                           Note: KV cache transfer happens during decode execution inside vLLM
 ```
 
 **Key Trace Characteristics:**
@@ -348,6 +353,8 @@ gateway.request (2150ms) [gateway-api-inference-extension]
 - **KV cache spans** show cache lookup and scoring for routing decisions
 - **Profile handler span** captures P/D disaggregation decision rationale
 - **P/D proxy coordinator metrics** provide true end-to-end TTFT (not vLLM's misleading local TTFT)
+- **Coordinator overhead** measures sidecar JSON processing only (~0.5ms in this example)
+- **Actual KV cache transfer** happens inside vLLM decode instance (included in vllm:llm_request duration)
 - **vLLM spans** show prefill and decode execution with GenAI semantic conventions
 
 
