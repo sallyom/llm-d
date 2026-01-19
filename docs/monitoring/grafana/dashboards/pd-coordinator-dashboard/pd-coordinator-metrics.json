@@ -218,12 +218,12 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "(sum(rate(llm_d_inference_scheduler_pd_proxy_prefill_duration_milliseconds_sum[5m])) / sum(rate(llm_d_inference_scheduler_pd_proxy_prefill_duration_milliseconds_count[5m]))) + (sum(rate(llm_d_inference_scheduler_pd_proxy_coordinator_overhead_milliseconds_sum[5m])) / sum(rate(llm_d_inference_scheduler_pd_proxy_coordinator_overhead_milliseconds_count[5m]))) + (sum(rate(vllm:time_to_first_token_seconds_sum{model_name=~\".*\",engine=~\".*\"}[5m])) / sum(rate(vllm:time_to_first_token_seconds_count{model_name=~\".*\",engine=~\".*\"}[5m]))) * 1000",
+          "expr": "(sum(rate(llm_d_inference_scheduler_pd_proxy_prefill_duration_milliseconds_sum[5m])) / sum(rate(llm_d_inference_scheduler_pd_proxy_prefill_duration_milliseconds_count[5m]))) + (sum(rate(llm_d_inference_scheduler_pd_proxy_coordinator_overhead_milliseconds_sum[5m])) / sum(rate(llm_d_inference_scheduler_pd_proxy_coordinator_overhead_milliseconds_count[5m]))) + (sum(rate(vllm:time_to_first_token_seconds_sum{pod=~\".*decode.*\"}[5m])) / sum(rate(vllm:time_to_first_token_seconds_count{pod=~\".*decode.*\"}[5m]))) * 1000",
           "refId": "A",
           "legendFormat": "True End-to-End TTFT"
         }
       ],
-      "title": "Avg True TTFT (End-to-End)",
+      "title": "Avg True TTFT (Prefill + Coordination + Decode)",
       "type": "stat"
     },
     {
@@ -291,7 +291,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "sum(rate(vllm:time_to_first_token_seconds_sum[5m])) / sum(rate(vllm:time_to_first_token_seconds_count[5m])) * 1000",
+          "expr": "sum(rate(vllm:time_to_first_token_seconds_sum{pod=~\".*decode.*\"}[5m])) / sum(rate(vllm:time_to_first_token_seconds_count{pod=~\".*decode.*\"}[5m])) * 1000",
           "refId": "A",
           "legendFormat": "Avg vLLM TTFT"
         }
@@ -358,6 +358,79 @@
         }
       ],
       "title": "Total P/D Requests",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Average TTFT reported by vLLM prefill instances (for comparison with decode TTFT)",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "type": "special",
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "No Data",
+                  "color": "text"
+                }
+              }
+            }
+          ],
+          "noValue": "No Data",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 31
+      },
+      "id": 25,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "textMode": "auto"
+      },
+      "pluginVersion": "12.1.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "expr": "sum(rate(vllm:time_to_first_token_seconds_sum{pod=~\".*prefill.*\"}[5m])) / sum(rate(vllm:time_to_first_token_seconds_count{pod=~\".*prefill.*\"}[5m])) * 1000",
+          "refId": "A",
+          "legendFormat": "Avg vLLM TTFT"
+        }
+      ],
+      "title": "Avg vLLM TTFT (Prefill)",
       "type": "stat"
     },
     {
@@ -857,7 +930,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "histogram_quantile(0.5, sum by (le) (rate(vllm:time_to_first_token_seconds_bucket[5m]))) * 1000",
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(vllm:time_to_first_token_seconds_bucket{pod=~\".*decode.*\"}[5m]))) * 1000",
           "refId": "A",
           "legendFormat": "p50"
         },
@@ -866,7 +939,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(vllm:time_to_first_token_seconds_bucket[5m]))) * 1000",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(vllm:time_to_first_token_seconds_bucket{pod=~\".*decode.*\"}[5m]))) * 1000",
           "refId": "B",
           "legendFormat": "p95"
         },
@@ -875,7 +948,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(vllm:time_to_first_token_seconds_bucket[5m]))) * 1000",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(vllm:time_to_first_token_seconds_bucket{pod=~\".*decode.*\"}[5m]))) * 1000",
           "refId": "C",
           "legendFormat": "p99"
         }

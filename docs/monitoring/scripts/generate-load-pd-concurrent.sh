@@ -16,6 +16,7 @@
 # - True TTFT (coordinator) will be noticeably higher than vLLM TTFT (decode)
 # - P/D coordination overhead visible with concurrent long prompts
 # - Prefill vs Decode duration comparison shows stage separation
+# - NIXL KV cache transfer metrics (transfer time, bytes transferred, post time)
 # - Different ISL/OSL patterns show when P/D is most beneficial
 
 set -e
@@ -24,7 +25,7 @@ set -e
 ENDPOINT="${ENDPOINT:-http://localhost:8000/v1}"
 CONCURRENT_WORKERS=${1:-6}
 DURATION_MINUTES=${2:-5}
-MODEL_NAME="${MODEL_NAME:-Qwen/Qwen3-0.6B}"
+MODEL_NAME="${MODEL_NAME:-meta-llama/Llama-3.1-8B-Instruct}"
 
 # Shared counter for statistics (macOS-compatible)
 STATS_DIR="/tmp/load_gen_stats_$$"
@@ -70,6 +71,7 @@ echo ""
 echo "This script creates sustained concurrent load to showcase:"
 echo "  ✓ True TTFT vs vLLM TTFT gap (coordinator view vs instance)"
 echo "  ✓ Prefill/Decode stage separation and P/D coordination overhead"
+echo "  ✓ NIXL KV cache transfer metrics (prefill→decode transfer time/size)"
 echo "  ✓ Impact of varied ISL/OSL ratios on P/D performance"
 echo "  ✓ Queueing behavior under concurrent load"
 echo ""
@@ -101,14 +103,14 @@ MEDIUM_PROMPTS=(
     "What are the key concepts in container orchestration and how does Kubernetes address them?"
 )
 
-# Long: ~1000-2000 tokens - optimal for P/D disaggregation
+# Long: ~1000-2000 tokens - optimal for P/D disaggregation, generates meaningful KV cache transfer sizes
 LONG_PROMPTS=(
     "Provide a comprehensive explanation of distributed tracing in cloud-native applications. Cover the OpenTelemetry standard, trace context propagation, span hierarchies, sampling strategies, and how tracing data helps optimize microservices performance. Include specific examples of using TraceQL to query distributed traces."
     "Explain prefill-decode disaggregation in LLM serving architectures. Describe how separating the prefill phase (processing input prompts) from the decode phase (generating output tokens) improves resource utilization. Discuss the role of KV cache transfer, the observability challenges this introduces, and why coordinator-level metrics are needed for True TTFT measurement."
     "Describe the architecture and benefits of KV cache-aware routing in distributed LLM inference systems. Explain how prompt prefix caching works, the scoring algorithms used to select endpoints with cache hits, and the performance impact on TTFT latency. Include details on how this interacts with P/D disaggregation."
 )
 
-# Very Long: ~3000-5000 tokens - maximum P/D benefit, highlights KV transfer clearly
+# Very Long: ~3000-5000 tokens - maximum P/D benefit, generates largest NIXL KV cache transfers (~8MB+)
 VERY_LONG_PROMPTS=(
     "I need a detailed technical analysis of modern LLM inference serving architectures. Start by explaining the fundamentals of transformer models and attention mechanisms, including how KV caches are generated and used during inference. Then describe the challenges of serving large language models at scale, including memory constraints, compute requirements, and latency targets. Cover advanced optimization techniques like continuous batching, prefix caching, and speculative decoding. Next, explain disaggregated serving architectures that separate prefill and decode phases, including the rationale for specialization (compute-bound prefill vs memory-bound decode), the mechanics of KV cache transfer over RDMA, and how to optimize the prefill-to-decode worker ratio. Discuss the observability gaps that disaggregation creates, specifically why vLLM-reported TTFT metrics are misleading in P/D mode and how distributed tracing with coordinator-level spans solves this problem. Finally, provide concrete recommendations for production deployments, including when to use disaggregation vs monolithic serving, how to tune selective P/D thresholds based on ISL/OSL ratios, and what TraceQL queries to use for performance analysis."
 )
@@ -170,7 +172,7 @@ worker_load_generator() {
         # Select prompt and parameters based on pattern
         case $pattern in
             "long_isl_short_osl")
-                # Long prompts, short outputs - highlights prefill stage and P/D coordination overhead
+                # Long prompts, short outputs - highlights prefill stage, NIXL KV transfers, and P/D coordination overhead
                 # This pattern shows maximum True TTFT vs vLLM TTFT gap
                 if [ $((request_count % 3)) -eq 0 ]; then
                     idx=$(( RANDOM % ${#VERY_LONG_PROMPTS[@]} ))
@@ -331,9 +333,9 @@ echo "Success Rate:    $(awk "BEGIN {printf \"%.1f\", $success * 100 / $total}")
 echo "Avg Throughput:  ${throughput} req/s"
 echo ""
 echo "Worker Distribution:"
-echo "  - Long ISL + Short OSL: Shows maximum True TTFT vs vLLM TTFT gap"
-echo "  - Long ISL + Long OSL:  Shows prefill vs decode duration breakdown"
-echo "  - Mixed Balanced:       Realistic production traffic patterns"
+echo "  - Long ISL + Short OSL: Shows maximum True TTFT vs vLLM TTFT gap + large NIXL transfers"
+echo "  - Long ISL + Long OSL:  Shows prefill vs decode duration breakdown + NIXL metrics"
+echo "  - Mixed Balanced:       Realistic production traffic patterns with varied KV cache sizes"
 echo "  - Bursty Long:          Tests queueing and coordination overhead"
 echo "  - Streaming Focused:    Tests streaming behavior with P/D"
 echo ""
@@ -349,10 +351,14 @@ echo "1. Open Grafana P/D Coordinator Dashboard:"
 echo "   http://localhost:3000/d/pd-coordinator-metrics"
 echo ""
 echo "2. Check key metrics in dashboard:"
-echo "   • True TTFT (Coordinator) - should be higher than vLLM TTFT"
+echo "   • True TTFT (Coordinator) - should be higher than vLLM TTFT (Decode)"
 echo "   • Coordinator Overhead - P/D coordination overhead (sidecar processing)"
 echo "   • Prefill vs Decode Duration - shows stage separation"
 echo "   • Total Request Duration - end-to-end client experience"
+echo "   • NIXL KV Transfer Metrics:"
+echo "     - Avg KV Transfer Time: ~50-100ms (prefill→decode KV cache transfer)"
+echo "     - Avg MB per Transfer: varies by ISL (longer prompts = larger KV cache)"
+echo "     - Total KV Transfers: should match number of P/D requests"
 echo ""
 echo "3. Explore traces in Grafana (Tempo):"
 echo "   Query: {resource.service.name=\"llm-d-pd-proxy\" && name=\"llm_d.pd_proxy.decode\"}"

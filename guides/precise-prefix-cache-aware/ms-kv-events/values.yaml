@@ -41,7 +41,7 @@ decode:
   - name: "vllm"
     #image: image: ghcr.io/llm-d/llm-d-cuda:v0.3.1
     # tracing image built with llm-d/docker/Dockerfile.cuda-with-otel
-    image: quay.io/sallyom/vllm:tracing
+    image: quay.io/sallyom/vllm:tracing-0.4
     modelCommand: custom
     command:
       - /bin/sh

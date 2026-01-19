@@ -39,7 +39,7 @@ decode:
       interval: "5s"
   containers:
   - name: "vllm"
-    image: quay.io/sallyom/vllm:tracing
+    image: quay.io/sallyom/vllm:tracing-0.4
     modelCommand: vllmServe
     args:
       # Keep tensor-parallelism as the first set of arguments
@@ -57,15 +57,29 @@ decode:
       - "--collect-detailed-traces"
       - "all"
     env:
+      - name: POD_IP
+        valueFrom:
+          fieldRef:
+            apiVersion: v1
+            fieldPath: status.podIP
       - name: VLLM_NIXL_SIDE_CHANNEL_HOST
         valueFrom:
           fieldRef:
             fieldPath: status.podIP
+      - name: VLLM_NIXL_SIDE_CHANNEL_PORT
+        value: "5557"
+      - name: UCX_TLS
+        value: "cuda_ipc,cuda_copy,tcp"
+      - name: PYTHONHASHSEED
+        value: "42"
       - name: VLLM_LOGGING_LEVEL
         value: DEBUG
       - name: OTEL_SERVICE_NAME
         value: "vllm-decode"
     ports:
+      - containerPort: 5557
+        name: nixl-channel
+        protocol: TCP
       - containerPort: 8200
         name: metrics
         protocol: TCP
@@ -125,7 +139,7 @@ prefill:
       interval: "5s"
   containers:
   - name: "vllm"
-    image: quay.io/sallyom/vllm:tracing
+    image: quay.io/sallyom/vllm:tracing-0.4
     modelCommand: vllmServe
     args:
       - "--block-size"
@@ -140,15 +154,29 @@ prefill:
       - "--collect-detailed-traces"
       - "all"
     env:
+      - name: POD_IP
+        valueFrom:
+          fieldRef:
+            apiVersion: v1
+            fieldPath: status.podIP
       - name: VLLM_NIXL_SIDE_CHANNEL_HOST
         valueFrom:
           fieldRef:
             fieldPath: status.podIP
+      - name: VLLM_NIXL_SIDE_CHANNEL_PORT
+        value: "5557"
+      - name: UCX_TLS
+        value: "cuda_ipc,cuda_copy,tcp"
+      - name: PYTHONHASHSEED
+        value: "42"
       - name: VLLM_LOGGING_LEVEL
         value: DEBUG
       - name: OTEL_SERVICE_NAME
         value: "vllm-prefill"
     ports:
+      - containerPort: 5557
+        name: nixl-channel
+        protocol: TCP
       - containerPort: 8000
         name: metrics
         protocol: TCP

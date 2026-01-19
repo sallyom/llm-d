@@ -1,14 +1,14 @@
 # Distributed Tracing Demo Script for P/D Disaggregation
 
-**Demo Duration**: ~15 minutes (Part 1: 5min + Part 2a: 5min + Part 2b: 5min)
+**Demo Duration**: ~12 minutes (Part 1: 5min + Part 2: 7min)
 **Setup**: 4 GPUs, Llama-3.1-8B, TCP networking (NIXL connector)
-**Guides Used**: `precise-prefix-cache-aware`, `pd-disaggregation`, `pd-disaggregation-nixl`
+**Guides Used**: `precise-prefix-cache-aware`, `pd-disaggregation`
 
 ---
 
 ## Demo Overview
 
-This demo has three parts:
+This demo has two parts:
 
 **Part 1 (5 min)**: Precise Prefix Cache Awareness & Intelligent Routing
 - Guide: `precise-prefix-cache-aware`
@@ -17,20 +17,15 @@ This demo has three parts:
 - Architecture: Decode-only pool (4 replicas) where EPP routes to pods with cached prefixes
 - Key point: **No cross-pod KV transfers** - EPP routes requests to avoid transfers
 
-**Part 2a (5 min)**: P/D Disaggregation with Coordinator Metrics & Distributed Tracing
+**Part 2 (7 min)**: P/D Disaggregation with Full Observability
 - Guide: `pd-disaggregation`
-- Focus: Coordinator-level observability for P/D disaggregation
-- Metrics: `llm_d_inference_scheduler_pd_proxy_*` (coordinator overhead, True TTFT)
+- Focus: End-to-end observability including coordinator metrics, NIXL KV transfers, and distributed tracing
+- Metrics:
+  - Coordinator: `llm_d_inference_scheduler_pd_proxy_*` (overhead, True TTFT)
+  - NIXL: `vllm:nixl_xfer_time_seconds`, `vllm:nixl_bytes_transferred`, `vllm:nixl_post_time_seconds`
 - Spans: `llm_d.pd_proxy.request`, `llm_d.pd_proxy.prefill`, `llm_d.pd_proxy.decode`
-- Architecture: Prefill → Decode with **routing-proxy sidecar** for orchestration
-- Key point: **End-to-end observability** from client perspective
-
-**Part 2b (5 min)**: P/D Disaggregation with NIXL KV Cache Transfer Metrics
-- Guide: `pd-disaggregation-nixl`
-- Focus: Measure actual KV cache network transfer overhead
-- Metrics: `vllm:nixl_xfer_time_seconds`, `vllm:nixl_bytes_transferred`, `vllm:nixl_post_time_seconds`
-- Architecture: Prefill → Decode with **native NIXL** (no routing-proxy)
-- Key point: **KV transfers visible** - shows actual network transfer time (5-20ms TCP, 2-8ms RDMA)
+- Architecture: Prefill → Decode with **routing-proxy sidecar** orchestrating NIXL KV transfers
+- Key point: **Complete observability stack** - coordinator, NIXL transfers, and distributed tracing in one deployment
 
 ---
 
@@ -46,16 +41,33 @@ This demo has three parts:
 
 ### Expected Metrics
 
-**Part 2a - P/D Disaggregation with Coordinator (pd-disaggregation):**
-- **True TTFT (Coordinator)**: 40-150ms
-- **vLLM TTFT (Decode)**: 20-70ms
-- **P/D Coordination Overhead**: 15-50ms (routing-proxy sidecar processing)
-- **Gap Between Coordinator & vLLM**: 20-80ms ← **This is the observability problem we're solving**
+**Part 2 - P/D Disaggregation with Full Observability (pd-disaggregation):**
 
-**Part 2b - P/D Disaggregation with NIXL (pd-disaggregation-nixl):**
-- **KV Cache Transfer Time**: 5-20ms (NIXL network transfer via TCP - RDMA would reduce to 2-8ms)
-- **Avg Bytes per Transfer**: Varies by prompt length (KV cache size)
-- **Total KV Transfers**: Increases as requests flow through prefill→decode
+**Coordinator Metrics:**
+- **True TTFT (End-to-End)**: 60-70ms
+- **vLLM TTFT (Decode only)**: 45-55ms
+- **vLLM TTFT (Prefill only)**: 12-18ms
+- **P/D Coordination Overhead**: 0.5-1ms (pure CPU - sidecar JSON/routing logic)
+- **Prefill Duration**: 12-18ms (HTTP roundtrip to prefill pod)
+- **Decode Duration**: 500-700ms (HTTP roundtrip for full generation)
+
+**True TTFT Breakdown:**
+```
+True TTFT (62.7ms) = Prefill Duration (15.1ms) + Coordinator Overhead (0.5ms) + vLLM Decode TTFT (47.5ms)
+```
+
+**NIXL KV Cache Transfer Metrics:**
+- **Avg KV Transfer Time**: 50-60ms (TCP network transfer - RDMA would reduce to 15-25ms)
+- **Avg MB per Transfer**: 5-8 MB (varies by prompt length/KV cache size)
+- **Total KV Transfers**: Should match number of P/D requests
+- **Failed Transfers**: 0 in healthy system
+- **Transfer Time p95**: 60-80ms
+- **NIXL Descriptors**: 150-200 per transfer (memory descriptors for KV blocks)
+
+**Key Insight**: The coordinator overhead (0.5ms) is **pure CPU processing time**. The actual network overhead is in:
+- Prefill HTTP roundtrip: ~15ms
+- NIXL KV transfer: ~50-60ms (TCP)
+- Decode HTTP roundtrip: ~500-700ms (includes generation)
 
 ---
 
@@ -120,7 +132,7 @@ This demo has three parts:
 
 ---
 
-## PART 2a: P/D Disaggregation with Coordinator Metrics & Tracing (5 minutes)
+## PART 2: P/D Disaggregation with Full Observability (7 minutes)
 
 ### 2.1 Introduction & Setup (30 seconds)
 
@@ -132,11 +144,12 @@ This demo has three parts:
 >
 > This demonstrates **heterogeneous parallelism** - the key P/D optimization pattern. Production 70B deployments use the same strategy at larger scale.
 >
-> **Important distinction**: In this architecture, there are TWO types of overhead:
-> 1. **P/D Coordination Overhead** (15-50ms): The sidecar's JSON processing and HTTP coordination between prefill and decode
-> 2. **KV Cache Transfer Time** (5-20ms): The actual network transfer of KV cache data via NIXL (which we just saw in Part 1)
+> **Important distinction**: In this architecture, we can observe three distinct types of overhead:
+> 1. **P/D Coordination Overhead** (~0.5ms): The sidecar's pure CPU time for JSON processing and routing logic
+> 2. **HTTP Roundtrip Time** (~15ms prefill, ~500ms decode): Network and HTTP processing for inter-service calls
+> 3. **NIXL KV Cache Transfer Time** (~50-60ms): The actual network transfer of KV cache data from prefill to decode
 >
-> The coordinator metrics track the total coordination overhead, which includes but is not limited to the KV transfer time."
+> The dashboard breaks down all three components so we can optimize each independently."
 
 ---
 
@@ -169,17 +182,18 @@ cd /path/to/llm-d
 >
 > In prefill-decode disaggregation, a single inference request flows through multiple components:
 > 1. Gateway routes the request
-> 2. Prefill instance processes the prompt and generates KV cache
-> 3. Coordinator sidecar orchestrates transfer of KV cache to decode
-> 4. KV cache is transferred over the network via NIXL (the overhead we saw in Part 1)
-> 5. Decode instance generates tokens using the transferred KV cache
+> 2. **Coordinator sidecar** orchestrates P/D flow (~0.5ms CPU overhead)
+> 3. **Prefill instance** processes the prompt and generates KV cache
+> 4. **NIXL transfers KV cache** from prefill to decode over the network (~50-60ms with TCP)
+> 5. **Decode instance** generates tokens using the transferred KV cache
 >
 > **The problem**: vLLM instances report metrics from their local perspective, not the client's true experience:
-> - The **prefill instance** reports TTFT that **excludes** coordination and KV transfer time
-> - The **decode instance** reports artificially **low** TTFT because the KV cache is already transferred
-> - **Neither instance** knows about gateway routing, scheduling, or coordination overhead
+> - The **prefill instance** reports TTFT of ~15ms, which is just prompt processing
+> - The **decode instance** reports TTFT of ~50ms, which seems fast but hides the full story
+> - **Neither instance** knows about the 50-60ms NIXL KV transfer time or the overall flow
+> - If you average prefill and decode TTFT, you get ~47ms - but the **true client TTFT is ~63ms**!
 >
-> Without coordinator-level metrics and tracing, you cannot accurately measure P/D performance or optimize it. You're flying blind."
+> This **15-16ms gap** is the observability problem we're solving with coordinator-level metrics, NIXL metrics, and distributed tracing."
 
 *[Optional: Show diagram from proposal if available]*
 
@@ -199,15 +213,15 @@ cd /path/to/llm-d
 **SAY:**
 > "These four metrics tell the story:
 >
-> 1. **Avg True TTFT (Coordinator)**: [point to value] - This is the **real TTFT** from the client's perspective. It includes gateway routing, scheduling, prefill, coordination overhead, and KV cache transfer.
+> 1. **Avg Coordinator Overhead**: [point to value showing ~0.5ms] - This is **pure CPU time** for the sidecar's JSON processing and routing logic. Sub-millisecond! This proves the coordinator itself is extremely efficient.
 >
-> 2. **Avg vLLM TTFT (Decode)**: [point to value] - Notice this is **significantly lower**. The decode instance doesn't know about the prefill or transfer time.
+> 2. **Avg True TTFT (End-to-End)**: [point to value showing ~63ms] - This is the **real TTFT** from the client's perspective. It includes prefill HTTP roundtrip, coordinator CPU overhead, and decode TTFT.
 >
-> 3. **Avg Coordinator Overhead**: [point to value] - This is the **P/D coordination overhead** - the sidecar's JSON processing and HTTP coordination between prefill and decode. This is **separate from** the KV cache transfer time we saw in Part 1. The coordinator overhead includes HTTP serialization, deserialization, and orchestration logic.
+> 3. **Avg vLLM TTFT (Decode)**: [point to value showing ~47-50ms] - This shows only the decode instance's local view. Notice it's lower than True TTFT because it doesn't include the prefill phase.
 >
-> 4. **Total P/D Requests**: [point to value] - Number of disaggregated requests processed.
+> 4. **Total P/D Requests**: [point to value showing 61] - Number of disaggregated requests processed.
 >
-> **This gap between coordinator TTFT and vLLM TTFT proves the observability problem** - if you only looked at vLLM metrics, you'd think performance was much better than reality."
+> **The key insight**: True TTFT (63ms) = Prefill Duration (15ms) + Coordinator Overhead (0.5ms) + vLLM Decode TTFT (47.5ms). The coordinator overhead is negligible - most time is in HTTP network roundtrips and NIXL KV transfers, which we'll see in the NIXL metrics below."
 
 ### Time Series Graphs
 
@@ -223,17 +237,20 @@ cd /path/to/llm-d
 
 **SAY:**
 > "This component breakdown is critical for optimization:
-> - **Prefill Duration**: Time spent processing the prompt in the prefill instance
-> - **Decode Duration**: Time spent generating output tokens in the decode instance
-> - **Coordinator Overhead**: P/D coordination overhead - the sidecar's JSON processing, HTTP serialization, and orchestration between prefill and decode
+> - **Prefill Duration**: ~15ms - HTTP roundtrip to prefill pod including prompt processing
+> - **Coordinator Overhead**: ~0.5ms - Pure CPU time for sidecar JSON/routing logic (negligible!)
+> - **Decode Duration**: ~500-700ms - HTTP roundtrip to decode pod for full token generation
 >
-> **Note**: The coordinator overhead (sidecar processing) is **separate from** the KV cache transfer time (NIXL network transfer) we saw in Part 1. The coordinator manages the overall flow, while NIXL handles the actual KV cache data transfer.
+> **Key distinction**: The coordinator overhead (~0.5ms) is **only CPU processing time**. The actual network time is in:
+> - Prefill HTTP roundtrip (~15ms)
+> - NIXL KV transfer (~50-60ms) - which we'll see in the NIXL metrics section below
+> - Decode HTTP roundtrip (~500-700ms)
 >
-> If we saw:
+> If we saw performance issues:
 > - **High prefill duration** → Add more prefill workers or reduce tensor parallelism
 > - **High decode duration** → Increase tensor parallelism on decode or add replicas
-> - **High coordinator overhead** → Optimize sidecar processing or reduce HTTP/JSON overhead
-> - **High KV transfer time** (from NIXL metrics) → Network issue or need for RDMA upgrade
+> - **High coordinator overhead** → This is rarely the issue (it's sub-millisecond!)
+> - **High NIXL transfer time** (from metrics below) → Network issue or need for RDMA upgrade
 >
 > This breakdown validates whether our 2P:1D ratio is optimal for this workload."
 
@@ -244,7 +261,36 @@ cd /path/to/llm-d
 
 ---
 
-### 2.5 The Power of Tracing: What Metrics Can't Tell You (3-4 minutes)
+### 2.5 NIXL KV Cache Transfer Metrics (1.5 minutes)
+
+*[Scroll down to "KV Cache Transfer Metrics (NIXL Connector)" section in the same dashboard]*
+
+**SAY:**
+> "Now let's look at the **NIXL KV cache transfer metrics** - this is where we measure the actual network transfer overhead when prefill sends KV cache to decode.
+>
+> **Top Row - Summary Stats:**
+> - **Avg KV Transfer Time**: [point to value showing ~58ms] - This is pure network transfer time with TCP. With RDMA, this would drop to 15-25ms - about 2-3x faster.
+> - **Avg MB per Transfer**: [point to value showing ~8 MB] - Shows KV cache size per transfer, varies by prompt length
+> - **Total KV Transfers**: [point to value showing ~2k] - Should match the number of P/D requests
+> - **Failed Transfers**: [point to value showing 0] - Should be zero in a healthy system
+>
+> **Bottom Row - Time Series:**
+> - **Transfer Time Percentiles** (p50, p95, p99): Shows distribution of transfer latency - p50 is ~52ms, p95 is ~141ms
+> - **Transfer Post Time**: Post-transfer processing time after KV cache arrives
+> - **Bytes Transferred Over Time**: Varies by prompt length - longer prompts = larger KV cache = more bytes
+> - **NIXL Descriptors**: ~150-200 memory descriptors used per transfer
+>
+> **Key Insights:**
+> 1. The **NIXL transfer time (~58ms)** is the dominant network overhead in P/D disaggregation
+> 2. This is **much larger than coordinator overhead (~0.5ms)** - optimizing the sidecar won't help performance
+> 3. **RDMA would reduce this to ~15-25ms** - these metrics help you quantify the ROI of RDMA infrastructure
+> 4. Transfer size correlates with prompt length - longer prompts from Workers 1, 2, 4, 6 show larger transfers"
+
+*[Show time series graphs, point out spikes correlating with long prompts]*
+
+---
+
+### 2.6 The Power of Tracing: What Metrics Can't Tell You (2 minutes)
 
 **SAY:**
 > "The metrics dashboard shows us **aggregate performance** - p50, p95, averages across all requests. But here's what metrics **cannot** tell us:
@@ -308,26 +354,6 @@ cd /path/to/llm-d
 
 ---
 
-### 2.6 Understanding the Two Types of Overhead (30 seconds)
-
-**SAY:**
-> "It's important to understand the difference between the two types of overhead we're measuring:
->
-> **1. P/D Coordination Overhead (Sidecar Metrics)**: 15-50ms
-> - The coordinator sidecar's JSON processing and HTTP orchestration
-> - Includes serialization, deserialization, request routing between prefill/decode
-> - Measured by: `llm_d_inference_scheduler_pd_proxy_coordinator_overhead_milliseconds`
-> - This is what we see in the dashboard's 'Avg Coordinator Overhead' panel
->
-> **2. KV Cache Transfer Time (NIXL Metrics)**: 5-20ms with TCP
-> - The actual network transfer of KV cache data from prefill to decode
-> - Measured by: `vllm:nixl_xfer_time_seconds`, `vllm:nixl_bytes_transferred`
-> - This is what we saw in Part 1 with the precise-prefix-cache-aware guide
-> - With **RDMA (RoCE + GPUDirect)**, this drops to 2-8ms - about 2-3x faster
->
-> **The total P/D overhead** includes both: coordinator orchestration + KV cache network transfer. By measuring them separately, we can optimize each component independently."
-
----
 
 ### 2.7 Cost Attribution (30 seconds)
 
@@ -357,175 +383,34 @@ cd /path/to/llm-d
 
 ---
 
-### 2.9 Summary: Why Coordinator Observability Matters (1 minute)
+### 2.9 Summary: Complete Observability Stack (1 minute)
 
 **SAY:**
-> "To summarize Part 2a, coordinator-level metrics and distributed tracing provide the end-to-end observability that's missing when you only look at vLLM instance metrics:
+> "To summarize, the P/D coordinator dashboard provides complete observability across three layers:
 >
-> **Metrics (Dashboard) Give You:**
-> - **True TTFT** from client perspective, not instance perspective
-> - **P/D coordination overhead** showing sidecar processing time
-> - **Component breakdown**: Time in prefill vs decode vs coordination
-> - **Aggregate trends**: p50, p95, p99 across all requests
+> **1. Coordinator Metrics - End-to-End View:**
+> - **True TTFT** (~63ms): Client perspective including all components
+> - **Coordinator Overhead** (~0.5ms): Pure CPU time - proves sidecar is efficient
+> - **Component Breakdown**: Prefill (~15ms), Decode (~500-700ms), Coordinator (~0.5ms)
+> - **Aggregate Trends**: p50, p95, p99 across all requests
 >
-> **Tracing (Individual Spans) Gives You:**
-> - **Request-level intelligence**: Why specific requests behaved differently
-> - **Decision context**: What routing/scheduling decisions were made and why
+> **2. NIXL Transfer Metrics - Network Overhead:**
+> - **KV Transfer Time** (~58ms with TCP): The dominant network overhead
+> - **Transfer Size** (~8 MB): Varies by prompt length
+> - **Transfer Percentiles**: p50, p95, p99 showing distribution
+> - **RDMA ROI**: Quantifies how much RDMA would improve performance (2-3x faster)
+>
+> **3. Distributed Tracing - Request-Level Intelligence:**
+> - **Why specific requests behaved differently**: Cache hits, routing decisions
+> - **Decision context**: What routing/scheduling logic was applied
 > - **Causal relationships**: The exact prefill→decode flow for each request
 > - **Cost attribution**: Token usage for per-request chargeback
 >
-> But there's one more piece of the puzzle: the actual **network transfer overhead** of moving KV cache data. Let me show you that now..."
-
-*[Transition to Part 2b]*
-
----
-
-## PART 2b: P/D Disaggregation with NIXL KV Cache Transfer Metrics (5 minutes)
-
-### 2b.1 Introduction: The Network Transfer Overhead (30 seconds)
-
-**SAY:**
-> "In Part 2a, we saw the **coordinator's view** of P/D - the orchestration overhead and end-to-end latency. But there's another critical metric: the actual **KV cache network transfer time** when prefill sends cache to decode.
->
-> The routing-proxy sidecar hides these metrics because it handles coordination at a higher level. To measure the raw network transfer overhead, we need to remove the sidecar and let vLLM instances communicate directly via NIXL.
->
-> I've deployed the **`pd-disaggregation-nixl` guide** - same architecture (2 prefill, 1 decode), but without the routing-proxy sidecar. This exposes vLLM's native NIXL metrics."
-
-*[Switch to pd-disaggregation-nixl deployment]*
-
----
-
-### 2b.2 Start Load & Check NIXL Metrics (2 minutes)
-
-**RUN:**
-```bash
-# Generate load on the NIXL-enabled stack
-./docs/monitoring/scripts/generate-load-pd-concurrent.sh 6 2
-```
-
-**SAY:**
-> "I'm sending the same concurrent load patterns we used before. As requests flow through prefill→decode, the NIXL connector transfers KV cache data over the network. Let's check the metrics directly from a pod."
-
-*[While load is running, exec into a pod to show NIXL metrics]*
-
-**RUN:**
-```bash
-kubectl exec -n <namespace> <decode-pod> -- curl -s localhost:8200/metrics | grep nixl
-```
-
-**SHOW:**
-```
-vllm:nixl_xfer_time_seconds_bucket{le="0.005",...} 15
-vllm:nixl_xfer_time_seconds_bucket{le="0.01",...} 45
-vllm:nixl_xfer_time_seconds_bucket{le="0.025",...} 89
-vllm:nixl_xfer_time_seconds_sum{...} 1.234
-vllm:nixl_xfer_time_seconds_count{...} 120
-
-vllm:nixl_bytes_transferred_sum{...} 52428800  # ~50 MB total
-vllm:nixl_bytes_transferred_count{...} 120
-```
-
-**SAY:**
-> "Perfect! Now we're seeing the actual NIXL KV cache transfer metrics:
->
-> - **`vllm:nixl_xfer_time_seconds`**: Histogram of transfer duration - most transfers are 5-20ms with TCP
-> - **`vllm:nixl_bytes_transferred`**: Total KV cache data transferred - varies by prompt length
-> - **`vllm:nixl_post_time_seconds`**: Post-transfer processing time
->
-> These metrics only appear in P/D disaggregation because prefill **must** transfer to decode. In the precise-prefix-cache guide (Part 1), EPP's smart routing avoided transfers entirely, so NIXL sat idle."
-
----
-
-### 2b.3 Grafana Dashboard: KV Cache Transfer Metrics (1.5 minutes)
-
-*[Switch to Grafana dashboard - scroll to "KV Cache Transfer Metrics (NIXL Connector)" section]*
-
-**SAY:**
-> "I've added a dashboard section specifically for NIXL metrics. Let's look at what we're seeing:
->
-> **Top Row - Summary Stats:**
-> - **Avg KV Transfer Time**: [point to value] - This is pure network transfer time with TCP
-> - **Avg MB per Transfer**: [point to value] - Shows KV cache size per transfer
-> - **Total KV Transfers**: [point to value] - How many prefill→decode transfers occurred
-> - **Failed Transfers**: Should be zero in a healthy system
->
-> **Bottom Row - Time Series:**
-> - **Transfer Time Percentiles** (p50, p95, p99): Shows distribution of transfer latency
-> - **Bytes Transferred Over Time**: Correlates with prompt lengths
-> - **NIXL Descriptors**: Memory descriptor usage
->
-> **Key Insight**: With **TCP networking** (what we're using), transfers are 5-20ms. With **RDMA + GPUDirect**, this drops to 2-8ms - about 2-3x faster. These metrics help you **quantify the ROI of RDMA infrastructure** for KV cache sharing."
-
-*[Show time series graphs, point out spikes correlating with long prompts]*
-
----
-
-### 2b.4 Comparison: Coordinator Overhead vs KV Transfer Time (1 minute)
-
-**SAY:**
-> "Now we've seen both types of overhead in P/D disaggregation:
->
-> **1. P/D Coordination Overhead** (Part 2a - with sidecar):
-> - **What it measures**: Routing-proxy sidecar's HTTP/JSON orchestration
-> - **Typical range**: 15-50ms
-> - **Metric**: `llm_d_inference_scheduler_pd_proxy_coordinator_overhead_milliseconds`
-> - **Includes**: Request routing, serialization, deserialization, HTTP handling
->
-> **2. KV Cache Transfer Time** (Part 2b - this part):
-> - **What it measures**: Raw network transfer of KV cache data via NIXL
-> - **Typical range**: 5-20ms with TCP, 2-8ms with RDMA
-> - **Metric**: `vllm:nixl_xfer_time_seconds`
-> - **Varies by**: KV cache size (prompt length), network speed, RDMA vs TCP
->
-> **Total P/D Overhead** = Coordination + KV Transfer + EPP Routing + vLLM Processing
->
-> By measuring these separately:
-> - **High coordinator overhead** → Optimize sidecar processing (async, reduce serialization)
-> - **High KV transfer time** → Network issue or need RDMA upgrade
-> - **Both low but still slow** → Look at EPP routing or vLLM inference itself
->
-> This granularity is essential for optimization in production."
-
----
-
-### 2b.5 Final Summary: Complete Observability Picture (1 minute)
-
-**SAY:**
-> "Let's wrap up by summarizing all three parts of this demo:
->
-> **Part 1 - Precise Prefix Cache & Intelligent Routing:**
-> - **Architecture**: Decode-only pool (4 replicas)
-> - **Key Learning**: EPP's smart routing avoids KV cache transfers by sending requests to pods that already have the cache
-> - **Metrics**: `llm_d_epp_prefix_cache_*` for routing decisions
-> - **NIXL Transfers**: None - routing eliminates the need
->
-> **Part 2a - P/D Disaggregation with Coordinator Observability:**
-> - **Architecture**: 2 Prefill + 1 Decode with routing-proxy sidecar
-> - **Key Learning**: End-to-end metrics and tracing show the true client experience, not just vLLM's local view
-> - **Metrics**: `llm_d_inference_scheduler_pd_proxy_*` for coordinator overhead and True TTFT
-> - **Spans**: Distributed traces showing prefill→decode flow and decision context
-> - **NIXL Transfers**: Hidden by sidecar coordination layer
->
-> **Part 2b - P/D Disaggregation with NIXL Metrics:**
-> - **Architecture**: Same 2 Prefill + 1 Decode but **without** routing-proxy
-> - **Key Learning**: Native NIXL metrics reveal the raw network transfer overhead
-> - **Metrics**: `vllm:nixl_xfer_time_seconds`, `vllm:nixl_bytes_transferred`
-> - **NIXL Transfers**: Visible! 5-20ms with TCP, 2-8ms with RDMA
->
-> **Why All Three Matter:**
->
-> - **Part 1** shows how to **avoid** KV transfers through intelligent routing
-> - **Part 2a** shows **end-to-end observability** when transfers are necessary (P/D architecture)
-> - **Part 2b** shows **network transfer metrics** to optimize infrastructure (TCP vs RDMA)
->
-> **In production**, you'd typically run Part 2a (with coordinator observability) for day-to-day operations, and deploy Part 2b temporarily when you need to analyze network transfer performance or justify RDMA investments.
->
-> **The big picture**: Without this multi-layered observability - EPP metrics, coordinator metrics, NIXL metrics, and distributed traces - you're flying blind in disaggregated LLM serving. This demo gives you the complete toolkit for operating and optimizing at scale."
+> **The Complete Picture**: Coordinator overhead is negligible (~0.5ms). The real overhead is NIXL KV transfer (~58ms) and HTTP roundtrips (~15ms prefill, ~500-700ms decode). This breakdown tells you exactly where to optimize."
 
 ---
 
 ## Quick Reference Commands
-
 ### Part 1: Precise Prefix Cache
 ```bash
 # Deploy precise-prefix-cache-aware
@@ -539,38 +424,25 @@ kubectl get pods -n ${NAMESPACE_PPCA}
 kubectl logs -n ${NAMESPACE_PPCA} <epp-pod> | grep "prefix_cache"
 ```
 
-### Part 2a: P/D with Coordinator Observability
+### Part 2: P/D with Full Observability
 ```bash
-# Deploy pd-disaggregation (with routing-proxy sidecar)
+# Deploy pd-disaggregation (with routing-proxy sidecar + NIXL metrics)
 cd guides/pd-disaggregation
 helmfile apply -n ${NAMESPACE_PD}
 
-# Verify deployment: 2 prefill + 1 decode + gateway
+# Verify deployment: 2 prefill + 1 decode (each with routing-proxy sidecar)
 kubectl get pods -n ${NAMESPACE_PD}
+# Should show "2/2" for containers: vllm + routing-proxy
 
 # Start load generation
 ./docs/monitoring/scripts/generate-load-pd-concurrent.sh 6 5
 
-# Check coordinator metrics
+# Check coordinator metrics (from routing-proxy sidecar)
 kubectl exec -n ${NAMESPACE_PD} <decode-pod> -c routing-proxy -- \
   curl -s localhost:9090/metrics | grep llm_d_inference_scheduler_pd_proxy
-```
 
-### Part 2b: P/D with NIXL Metrics
-```bash
-# Deploy pd-disaggregation-nixl (without routing-proxy)
-cd guides/pd-disaggregation-nixl
-helmfile apply -n ${NAMESPACE_NIXL}
-
-# Verify deployment: 2 prefill + 1 decode (no sidecar)
-kubectl get pods -n ${NAMESPACE_NIXL}
-# Should show "1/1" for vllm only, not "2/2"
-
-# Start load generation
-./docs/monitoring/scripts/generate-load-pd-concurrent.sh 6 2
-
-# Check NIXL metrics appear
-kubectl exec -n ${NAMESPACE_NIXL} <decode-pod> -- \
+# Check NIXL metrics (from vLLM container)
+kubectl exec -n ${NAMESPACE_PD} <decode-pod> -c vllm -- \
   curl -s localhost:8200/metrics | grep nixl
 ```
 
