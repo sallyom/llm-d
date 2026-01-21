@@ -1,5 +1,23 @@
 multinode: false
 
+# OpenTelemetry distributed tracing configuration
+# Global config for current (vLLM) and future instrumented components (routing-sidecar, inference-scheduler, kv-cache, etc.)
+# Set enabled: true to enable tracing across all components
+# Override collector endpoint via helmfile set or by editing this value
+global:
+  tracing:
+    enabled: true  # Set to true to enable distributed tracing
+    otlpEndpoint: "http://opentelemetry-collector.monitoring.svc.cluster.local:4317"
+    # "http://llm-d-collector-collector.observability-hub.svc.cluster.local:4317"
+    sampling:
+      sampler: "parentbased_traceidratio"
+      samplerArg: "1.0"  # 100% sampling for demo (production: 0.1 = 10%)
+    serviceNames:
+      vllmDecode: "vllm-decode"
+      vllmPrefill: "vllm-prefill"
+    vllm:
+      collectDetailedTraces: "all"
+
 modelArtifacts:
   uri: "hf://Qwen/Qwen3-0.6B"
   name: "Qwen/Qwen3-0.6B"
@@ -25,7 +43,9 @@ decode:
       interval: "30s"
   containers:
   - name: "vllm"
-    image: ghcr.io/llm-d/llm-d-cuda:v0.4.0
+    # vLLM image - override for tracing-enabled builds or custom images
+    image: "quay.io/sallyom/vllm:tracing-0.5"
+    #image: "ghcr.io/llm-d/llm-d-cuda:v0.4.0"
     modelCommand: vllmServe
     args:
       - "--disable-uvicorn-access-log"
