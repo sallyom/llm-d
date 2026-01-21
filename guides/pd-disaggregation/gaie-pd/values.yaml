@@ -54,7 +54,19 @@ inferenceExtension:
       enabled: true
       auth:
         # To allow unauthenticated /metrics access (e.g., for debugging with curl), set to false
-        enabled: true
+        enabled: false
+
+  # OpenTelemetry distributed tracing configuration
+  # Set enabled: true to enable distributed tracing for EPP/GAIE
+  # Override collector endpoint via helmfile set or by editing this value
+  tracing:
+    enabled: false  # Set to true to enable distributed tracing
+    # OTLP endpoint for trace export
+    otelExporterEndpoint: "http://opentelemetry-collector.monitoring.svc.cluster.local:4317"
+    sampling:
+      # Parent-based sampling with 100% trace ratio for demo (production would use 0.1 = 10%)
+      sampler: "parentbased_traceidratio"
+      samplerArg: "1.0"
 
 inferencePool:
   targetPorts:

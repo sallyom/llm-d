@@ -49,6 +49,7 @@ spec:
             emptyDir: {}
         containers:
         - name: vllm
+          # When enabling distributed tracing, use an image built with opentelemetry packages
           image: ghcr.io/llm-d/llm-d-cuda:v0.4.0
           securityContext:
             capabilities:
@@ -72,6 +73,11 @@ spec:
               #################
               START_RANK=$(( ${LWS_WORKER_INDEX:-0} * DP_SIZE_LOCAL ))
             
+              # to enable tracing add the following vllm engine args below:
+              # --otlp-traces-endpoint=http://opentelemetry-collector.monitoring.svc.cluster.local:4317
+              # --collect-detailed-traces=all
+            
+              # wide-ep-lws specific vllm engine args:
               # --data-parallel-hybrid-lb: Use exernal load balancing across nodes, and internal load balancing within a node
               # --enable-expert-parallel:  Use TPxDP in attention, EP in MoE layers
               # --async-scheduling: Reduce white space between engine steps
