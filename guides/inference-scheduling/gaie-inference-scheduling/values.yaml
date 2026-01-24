@@ -35,9 +35,9 @@ inferenceExtension:
   # Set enabled: true to enable distributed tracing for EPP/GAIE
   # Override collector endpoint via helmfile set or by editing this value
   tracing:
-    enabled: false  # Set to true to enable distributed tracing
-    otelExporterEndpoint: "http://opentelemetry-collector.monitoring.svc.cluster.local:4317"
-    # "http://llm-d-collector-collector.observability-hub.svc.cluster.local:4317"
+    enabled: true  # Set to true to enable distributed tracing
+    #otelExporterEndpoint: "http://opentelemetry-collector.monitoring.svc.cluster.local:4317"
+    otelExporterEndpoint:  "http://llm-d-collector-collector.observability-hub.svc.cluster.local:4317"
     sampling:
       sampler: "parentbased_traceidratio"
       samplerArg: "1.0"  # 100% sampling for demo (production: 0.1 = 10%)

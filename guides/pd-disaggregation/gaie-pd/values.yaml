@@ -6,8 +6,10 @@ inferenceExtension:
     kv-cache-usage-percentage-metric: "vllm:kv_cache_usage_perc"
   image:
     name: llm-d-inference-scheduler
-    hub: ghcr.io/llm-d
-    tag: v0.4.0
+    #hub: ghcr.io/llm-d
+    #tag: v0.4.0
+    hub: quay.io/sallyom
+    tag: tracing-0.5
     pullPolicy: Always
   extProcPort: 9002
   pluginsConfigFile: "pd-config.yaml"
@@ -46,7 +48,7 @@ inferenceExtension:
 
   # Monitoring configuration for EPP
   monitoring:
-    interval: "10s"
+    interval: "5s"
     # Prometheus ServiceMonitor will be created when enabled for EPP metrics collection
     secret:
       name: pd-gateway-sa-metrics-reader-secret
@@ -60,9 +62,10 @@ inferenceExtension:
   # Set enabled: true to enable distributed tracing for EPP/GAIE
   # Override collector endpoint via helmfile set or by editing this value
   tracing:
-    enabled: false  # Set to true to enable distributed tracing
+    enabled: true  # Set to true to enable distributed tracing
     # OTLP endpoint for trace export
-    otelExporterEndpoint: "http://opentelemetry-collector.monitoring.svc.cluster.local:4317"
+    #otelExporterEndpoint: "http://opentelemetry-collector.monitoring.svc.cluster.local:4317"
+    otelExporterEndpoint: "http://llm-d-collector-collector.observability-hub.svc.cluster.local:4317"
     sampling:
       # Parent-based sampling with 100% trace ratio for demo (production would use 0.1 = 10%)
       sampler: "parentbased_traceidratio"

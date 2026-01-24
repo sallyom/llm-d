@@ -119,6 +119,10 @@ Grafana dashboard raw JSON files can be imported manually into a Grafana UI. Her
 
 - [llm-d vLLM Overview dashboard](./grafana/dashboards/llm-d-vllm-overview.json)
   - vLLM metrics
+- [llm-d GPU Availability dashboard](./grafana/dashboards/llm-d-gpu-availability.json)
+  - GPU allocation and availability across cluster nodes
+  - Shows which nodes have schedulable GPUs available for test runs
+  - Requires kube-state-metrics
 - [inference-gateway dashboard v1.0.1](https://github.com/kubernetes-sigs/gateway-api-inference-extension/blob/v1.0.1/tools/dashboards/inference_gateway.json)
   - EPP metrics
 - [GKE managed inference gateway dashboard](https://cloud.google.com/kubernetes-engine/docs/how-to/customize-gke-inference-gateway-configurations#inference-gateway-dashboard)

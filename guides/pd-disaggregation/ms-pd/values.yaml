@@ -6,8 +6,9 @@ multinode: false
 # Override collector endpoint via helmfile set or by editing this value
 global:
   tracing:
-    enabled: false  # Set to true to enable distributed tracing
-    otlpEndpoint: "http://opentelemetry-collector.monitoring.svc.cluster.local:4317"
+    enabled: true  # Set to true to enable distributed tracing
+    otlpEndpoint: "http://llm-d-collector-collector.observability-hub.svc.cluster.local:4317"
+    #otlpEndpoint: "http://opentelemetry-collector.monitoring.svc.cluster.local:4317"
     sampling:
       sampler: "parentbased_traceidratio"
       samplerArg: "1.0"  # 100% sampling for demo (production: 0.1 = 10%)
@@ -18,21 +19,26 @@ global:
       collectDetailedTraces: "all"
 
 modelArtifacts:
-  uri: "hf://RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic"
-  size: 100Gi
+  uri: "hf://meta-llama/Llama-3.1-8B-Instruct"
+  #uri: "hf://RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic"
+  #size: 100Gi
+  size: 20Gi
   authSecretName: "llm-d-hf-token"
-  name: "RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic"
+  #name: "RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic"
+  name: "meta-llama/Llama-3.1-8B-Instruct"
 
 routing:
   servicePort: 8000
   proxy:
-    image: ghcr.io/llm-d/llm-d-routing-sidecar:v0.4.0
+    #image: ghcr.io/llm-d/llm-d-routing-sidecar:v0.4.0
+    image: quay.io/sallyom/llm-d-routing-sidecar:tracing-0.5
     connector: nixlv2
     secure: false
 
 decode:
   parallelism:
-    tensor: 4
+    #tensor: 4
+    tensor: 2
   create: true
   replicas: 1
   monitoring:
@@ -40,11 +46,12 @@ decode:
       enabled: true
       portName: "vllm" # decode vLLM service port (from routing.proxy.targetPort)
       path: "/metrics"
-      interval: "30s"
+      interval: "5s"
   containers:
   - name: "vllm"
     # vLLM image - override for tracing-enabled builds or custom images
-    image: "ghcr.io/llm-d/llm-d-cuda:v0.4.0"
+    #image: "ghcr.io/llm-d/llm-d-cuda:v0.4.0"
+    image: quay.io/sallyom/vllm:tracing-0.5
     modelCommand: vllmServe
     args:
       - "--block-size"
@@ -142,12 +149,13 @@ prefill:
       enabled: true
       portName: "vllm" # prefill vLLM service port (from routing.servicePort)
       path: "/metrics"
-      interval: "30s"
+      interval: "5s"
   containers:
   - name: "vllm"
     # vLLM image - override for tracing-enabled builds or custom images
     # For tracing: use ghcr.io/llm-d/vllm:v0.6.4.post1-tracing or quay.io/sallyom/vllm:v0.6.4.post1-tracing
-    image: "ghcr.io/llm-d/llm-d-cuda:v0.4.0"
+    #image: "ghcr.io/llm-d/llm-d-cuda:v0.4.0"
+    image: quay.io/sallyom/vllm:tracing-0.5
     modelCommand: vllmServe
     args:
       - "--block-size"
