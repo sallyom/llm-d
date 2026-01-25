@@ -93,12 +93,14 @@ decode:
         memory: 64Gi
         cpu: "16"
         # note: GPU resources get controlled by parallelism + accelerators above
-        rdma/ib: 1
+        rdma/roce_gdr: 1
+        #rdma/ib: 1
       requests:
         memory: 64Gi
         cpu: "16"
         # note: GPU resources get controlled by parallelism + accelerators above
-        rdma/ib: 1
+        rdma/roce_gdr: 1
+        #rdma/ib: 1
     mountModelVolume: true
     volumeMounts:
     - name: metrics-volume
@@ -200,12 +202,12 @@ prefill:
         memory: 64Gi
         cpu: "8"
         # note: GPU resources get controlled by parallelism + accelerators above
-        rdma/ib: 1
+        rdma/roce_gdr: 1
       requests:
         memory: 64Gi
         cpu: "8"
         # note: GPU resources get controlled by parallelism + accelerators above
-        rdma/ib: 1
+        rdma/roce_gdr: 1
     mountModelVolume: true
     volumeMounts:
     - name: metrics-volume
