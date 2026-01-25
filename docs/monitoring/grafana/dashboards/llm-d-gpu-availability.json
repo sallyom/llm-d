@@ -70,7 +70,7 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "Shows total, allocated, and free GPUs across all cluster nodes. Sorted by free GPUs (most available at top) to help identify nodes ready for test runs.",
+      "description": "Shows total, allocated, and free GPUs plus free RDMA resources across all cluster nodes. Sorted by free GPUs (most available at top) to help identify nodes ready for test runs.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -169,11 +169,49 @@
                 "value": 140
               }
             ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Free RDMA"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "rgba(128, 128, 128, 0.2)",
+                      "value": null
+                    },
+                    {
+                      "color": "rgba(128, 128, 128, 0.2)",
+                      "value": 0
+                    },
+                    {
+                      "color": "rgba(50, 172, 45, 0.2)",
+                      "value": 1
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "custom.width",
+                "value": 120
+              }
+            ]
           }
         ]
       },
       "gridPos": {
-        "h": 10,
+        "h": 16,
         "w": 24,
         "x": 0,
         "y": 0
@@ -205,12 +243,12 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "kube_node_status_allocatable{resource=\"nvidia_com_gpu\"}",
+          "expr": "sum by(node) (kube_node_status_allocatable{resource=\"nvidia_com_gpu\",node!=\"\"})",
           "format": "table",
           "instant": true,
-          "legendFormat": "__auto",
+          "legendFormat": "",
           "range": false,
-          "refId": "TotalGPUs"
+          "refId": "A"
         },
         {
           "datasource": {
@@ -219,13 +257,28 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "sum by(node) (kube_pod_container_resource_requests{resource=\"nvidia_com_gpu\"})",
+          "expr": "sum by(node) (kube_pod_container_resource_requests{resource=\"nvidia_com_gpu\",node!=\"\"}) or (sum by(node) (kube_node_status_allocatable{resource=\"nvidia_com_gpu\",node!=\"\"}) * 0)",
           "format": "table",
           "hide": false,
           "instant": true,
-          "legendFormat": "__auto",
+          "legendFormat": "",
           "range": false,
-          "refId": "AllocatedGPUs"
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "exemplar": false,
+          "expr": "sum by(node) (kube_node_status_allocatable{resource=\"rdma_roce_gdr\",node!=\"\"}) - (sum by(node) (kube_pod_container_resource_requests{resource=\"rdma_roce_gdr\",node!=\"\"}) or (sum by(node) (kube_node_status_allocatable{resource=\"rdma_roce_gdr\",node!=\"\"}) * 0))",
+          "format": "table",
+          "hide": false,
+          "instant": true,
+          "legendFormat": "",
+          "range": false,
+          "refId": "C"
         }
       ],
       "title": "GPU Availability by Node",
@@ -238,30 +291,37 @@
           "id": "organize",
           "options": {
             "excludeByName": {
-              "Time": true,
-              "__name__": true,
-              "endpoint": true,
-              "instance": true,
-              "job": true,
-              "namespace": true,
-              "pod": true,
-              "resource": true,
-              "service": true,
-              "uid": true,
-              "unit": true
+              "Time": true
             },
             "includeByName": {},
             "indexByName": {
-              "Time": 0,
-              "Value #AllocatedGPUs": 3,
-              "Value #TotalGPUs": 2,
-              "node": 1
+              "Value #A": 1,
+              "Value #B": 2,
+              "Value #C": 4,
+              "node": 0
             },
             "renameByName": {
-              "Value #AllocatedGPUs": "Allocated GPUs",
-              "Value #TotalGPUs": "Total GPUs",
+              "Value #A": "Total GPUs",
+              "Value #B": "Allocated GPUs",
+              "Value #C": "Free RDMA",
               "node": "Node"
             }
+          }
+        },
+        {
+          "id": "filterByValue",
+          "options": {
+            "filters": [
+              {
+                "config": {
+                  "id": "isNotNull",
+                  "options": {}
+                },
+                "fieldName": "Node"
+              }
+            ],
+            "match": "all",
+            "type": "include"
           }
         },
         {
@@ -288,6 +348,7 @@
             "indexByName": {
               "Allocated GPUs": 2,
               "Free GPUs": 3,
+              "Free RDMA": 4,
               "Node": 0,
               "Total GPUs": 1
             },
@@ -354,7 +415,7 @@
         "h": 4,
         "w": 24,
         "x": 0,
-        "y": 10
+        "y": 16
       },
       "id": 2,
       "options": {
@@ -395,7 +456,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "sum(kube_pod_container_resource_requests{resource=\"nvidia_com_gpu\"})",
+          "expr": "sum(kube_pod_container_resource_requests{resource=\"nvidia_com_gpu\"}) or vector(0)",
           "hide": false,
           "instant": true,
           "legendFormat": "Allocated GPUs",
@@ -409,7 +470,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "sum(kube_node_status_allocatable{resource=\"nvidia_com_gpu\"}) - sum(kube_pod_container_resource_requests{resource=\"nvidia_com_gpu\"})",
+          "expr": "sum(kube_node_status_allocatable{resource=\"nvidia_com_gpu\"}) - (sum(kube_pod_container_resource_requests{resource=\"nvidia_com_gpu\"}) or vector(0))",
           "hide": false,
           "instant": true,
           "legendFormat": "Free GPUs",
@@ -418,6 +479,116 @@
         }
       ],
       "title": "Cluster GPU Summary",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Shows the RDMA resource type available in this cluster. Use this resource name in your pod specs (e.g., rdma/roce_gdr vs rdma/ib).",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "rdma_roce_gdr": {
+                  "text": "rdma/roce_gdr (RoCE with GPUDirect)",
+                  "color": "blue"
+                }
+              }
+            },
+            {
+              "type": "value",
+              "options": {
+                "rdma_ib": {
+                  "text": "rdma/ib (InfiniBand)",
+                  "color": "blue"
+                }
+              }
+            },
+            {
+              "type": "special",
+              "options": {
+                "match": "null",
+                "result": {
+                  "text": "No RDMA",
+                  "color": "text"
+                }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 3,
+        "w": 24,
+        "x": 0,
+        "y": 20
+      },
+      "id": 3,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "horizontal",
+        "percentChangeColorMode": "standard",
+        "reduceOptions": {
+          "values": false,
+          "calcs": ["lastNotNull"],
+          "fields": "/^resource$/"
+        },
+        "showPercentChange": false,
+        "text": {},
+        "textMode": "value",
+        "wideLayout": true
+      },
+      "pluginVersion": "11.3.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "exemplar": false,
+          "expr": "label_replace(count by(resource) (kube_node_status_allocatable{resource=~\"rdma.*\"}), \"resource\", \"$1\", \"resource\", \"(.*)\")",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "",
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "RDMA Resource Type",
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "Value": true
+            },
+            "includeByName": {},
+            "indexByName": {},
+            "renameByName": {}
+          }
+        }
+      ],
       "type": "stat"
     }
   ],

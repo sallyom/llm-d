@@ -120,8 +120,10 @@ Grafana dashboard raw JSON files can be imported manually into a Grafana UI. Her
 - [llm-d vLLM Overview dashboard](./grafana/dashboards/llm-d-vllm-overview.json)
   - vLLM metrics
 - [llm-d GPU Availability dashboard](./grafana/dashboards/llm-d-gpu-availability.json)
-  - GPU allocation and availability across cluster nodes
-  - Shows which nodes have schedulable GPUs available for test runs
+  - GPU allocation and availability (Total, Allocated, Free) plus Free RDMA across cluster nodes
+  - Shows which nodes have schedulable GPUs and RDMA resources available for test runs
+  - Displays RDMA resource type (rdma/roce_gdr vs rdma/ib) to avoid deployment spec mismatches
+  - Helps identify scheduling issues when pods require both GPU and RDMA
   - Requires kube-state-metrics
 - [inference-gateway dashboard v1.0.1](https://github.com/kubernetes-sigs/gateway-api-inference-extension/blob/v1.0.1/tools/dashboards/inference_gateway.json)
   - EPP metrics

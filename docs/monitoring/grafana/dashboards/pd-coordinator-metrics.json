@@ -344,12 +344,12 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "sum(llm_d_inference_scheduler_pd_proxy_total_duration_milliseconds_count)",
+          "expr": "sum(vllm:e2e_request_latency_seconds_count{namespace=~\"$namespace\"})",
           "refId": "A",
           "legendFormat": "Total Requests"
         }
       ],
-      "title": "Total P/D Requests",
+      "title": "Total Requests",
       "type": "stat"
     },
     {
@@ -430,7 +430,7 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "Sidecar JSON processing overhead between prefill and decode (excludes KV cache transfer which happens inside vLLM)",
+      "description": "End-to-end request latency from vLLM including prefill and decode phases. Note: Does not include pd-proxy sidecar coordination overhead (~0-1ms).",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -439,7 +439,7 @@
           "custom": {
             "axisCenteredZero": false,
             "axisColorMode": "text",
-            "axisLabel": "Overhead (ms)",
+            "axisLabel": "E2E Latency (s)",
             "axisPlacement": "auto",
             "barAlignment": 0,
             "drawStyle": "line",
@@ -476,11 +476,11 @@
               },
               {
                 "color": "red",
-                "value": 20
+                "value": 10
               }
             ]
           },
-          "unit": "ms"
+          "unit": "s"
         },
         "overrides": []
       },
@@ -513,7 +513,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "histogram_quantile(0.5, sum by (le) (rate(llm_d_inference_scheduler_pd_proxy_coordinator_overhead_milliseconds_bucket[$__rate_interval])))",
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(vllm:e2e_request_latency_seconds_bucket{namespace=~\"$namespace\"}[$__rate_interval])))",
           "refId": "A",
           "legendFormat": "p50"
         },
@@ -522,7 +522,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(llm_d_inference_scheduler_pd_proxy_coordinator_overhead_milliseconds_bucket[$__rate_interval])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(vllm:e2e_request_latency_seconds_bucket{namespace=~\"$namespace\"}[$__rate_interval])))",
           "refId": "B",
           "legendFormat": "p95"
         },
@@ -531,12 +531,12 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(llm_d_inference_scheduler_pd_proxy_coordinator_overhead_milliseconds_bucket[$__rate_interval])))",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(vllm:e2e_request_latency_seconds_bucket{namespace=~\"$namespace\"}[$__rate_interval])))",
           "refId": "C",
           "legendFormat": "p99"
         }
       ],
-      "title": "Coordinator Overhead",
+      "title": "P/D E2E Latency (Prefill + Decode)",
       "type": "timeseries"
     },
     {
@@ -544,7 +544,6 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "End-to-end request duration from P/D sidecar entry to completion",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -553,7 +552,7 @@
           "custom": {
             "axisCenteredZero": false,
             "axisColorMode": "text",
-            "axisLabel": "Duration (ms)",
+            "axisLabel": "Duration (s)",
             "axisPlacement": "auto",
             "barAlignment": 0,
             "drawStyle": "line",
@@ -590,7 +589,7 @@
               }
             ]
           },
-          "unit": "ms"
+          "unit": "s"
         },
         "overrides": []
       },
@@ -623,7 +622,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "histogram_quantile(0.5, sum by (le) (rate(llm_d_inference_scheduler_pd_proxy_total_duration_milliseconds_bucket[$__rate_interval])))",
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(vllm:e2e_request_latency_seconds_bucket{namespace=~\"$namespace\"}[$__rate_interval])))",
           "refId": "A",
           "legendFormat": "p50"
         },
@@ -632,12 +631,13 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(llm_d_inference_scheduler_pd_proxy_total_duration_milliseconds_bucket[$__rate_interval])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(vllm:e2e_request_latency_seconds_bucket{namespace=~\"$namespace\"}[$__rate_interval])))",
           "refId": "B",
           "legendFormat": "p95"
         }
       ],
-      "title": "Total Request Duration (P/D Coordinator)",
+      "title": "Total Request Duration (vLLM E2E)",
+      "description": "End-to-end request latency from vLLM. Note: Does not include pd-proxy sidecar overhead (~0-1ms).",
       "type": "timeseries"
     },
     {
@@ -658,7 +658,6 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "Prefill HTTP round-trip duration (includes network, HTTP parsing, and vLLM prefill processing)",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -667,7 +666,7 @@
           "custom": {
             "axisCenteredZero": false,
             "axisColorMode": "text",
-            "axisLabel": "Duration (ms)",
+            "axisLabel": "Duration (s)",
             "axisPlacement": "auto",
             "drawStyle": "line",
             "fillOpacity": 20,
@@ -675,7 +674,7 @@
             "lineWidth": 2,
             "showPoints": "auto"
           },
-          "unit": "ms"
+          "unit": "s"
         },
         "overrides": []
       },
@@ -706,12 +705,13 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "histogram_quantile(0.5, sum by (le) (rate(llm_d_inference_scheduler_pd_proxy_prefill_duration_milliseconds_bucket[$__rate_interval])))",
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(vllm:request_prefill_time_seconds_bucket{namespace=~\"$namespace\"}[$__rate_interval])))",
           "refId": "A",
           "legendFormat": "p50"
         }
       ],
-      "title": "Prefill Duration",
+      "title": "vLLM Prefill Duration",
+      "description": "Prefill phase duration from vLLM. Note: Does not include pd-proxy sidecar overhead (~0-1ms).",
       "type": "timeseries"
     },
     {
@@ -719,7 +719,7 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "Decode HTTP round-trip duration (includes network, HTTP parsing, vLLM decode processing, and KV cache transfer inside vLLM)",
+      "description": "Decode phase duration from vLLM. Note: Does not include pd-proxy sidecar overhead (~0-1ms).",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -728,7 +728,7 @@
           "custom": {
             "axisCenteredZero": false,
             "axisColorMode": "text",
-            "axisLabel": "Duration (ms)",
+            "axisLabel": "Duration (s)",
             "axisPlacement": "auto",
             "drawStyle": "line",
             "fillOpacity": 20,
@@ -736,7 +736,7 @@
             "lineWidth": 2,
             "showPoints": "auto"
           },
-          "unit": "ms"
+          "unit": "s"
         },
         "overrides": []
       },
@@ -767,12 +767,12 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "histogram_quantile(0.5, sum by (le) (rate(llm_d_inference_scheduler_pd_proxy_decode_duration_milliseconds_bucket[$__rate_interval])))",
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(vllm:request_decode_time_seconds_bucket{namespace=~\"$namespace\"}[$__rate_interval])))",
           "refId": "A",
           "legendFormat": "p50"
         }
       ],
-      "title": "Decode Duration",
+      "title": "vLLM Decode Duration",
       "type": "timeseries"
     },
     {
@@ -793,7 +793,7 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "P/D coordination overhead breakdown: Prefill HTTP + Coordinator Processing + Decode HTTP",
+      "description": "Prefill and decode phase durations from vLLM. Note: pd-proxy sidecar coordination overhead (~0-0.5ms) not shown as it requires pd-coordinator-metrics branch.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -802,7 +802,7 @@
           "custom": {
             "axisCenteredZero": false,
             "axisColorMode": "text",
-            "axisLabel": "Duration (ms)",
+            "axisLabel": "Duration (s)",
             "axisPlacement": "auto",
             "drawStyle": "line",
             "fillOpacity": 20,
@@ -810,7 +810,7 @@
             "lineWidth": 2,
             "showPoints": "auto"
           },
-          "unit": "ms"
+          "unit": "s"
         },
         "overrides": []
       },
@@ -842,30 +842,21 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "histogram_quantile(0.5, sum by (le) (rate(llm_d_inference_scheduler_pd_proxy_prefill_duration_milliseconds_bucket[$__rate_interval])))",
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(vllm:request_prefill_time_seconds_bucket{namespace=~\"$namespace\"}[$__rate_interval])))",
           "refId": "A",
-          "legendFormat": "Prefill HTTP (p50)"
+          "legendFormat": "vLLM Prefill (p50)"
         },
         {
           "datasource": {
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "expr": "histogram_quantile(0.5, sum by (le) (rate(llm_d_inference_scheduler_pd_proxy_coordinator_overhead_milliseconds_bucket[$__rate_interval])))",
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(vllm:request_decode_time_seconds_bucket{namespace=~\"$namespace\"}[$__rate_interval])))",
           "refId": "B",
-          "legendFormat": "Coordinator Overhead (p50)"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "expr": "histogram_quantile(0.5, sum by (le) (rate(llm_d_inference_scheduler_pd_proxy_decode_duration_milliseconds_bucket[$__rate_interval])))",
-          "refId": "C",
-          "legendFormat": "Decode HTTP (p50)"
+          "legendFormat": "vLLM Decode (p50)"
         }
       ],
-      "title": "P/D Coordination Breakdown (Coordinator View)",
+      "title": "P/D Phase Breakdown (vLLM View)",
       "type": "timeseries"
     },
     {
