@@ -1,6 +1,23 @@
 # Simplified Intel CPU configuration using imageDefault mode
 # This configuration lets the chart handle most vLLM parameters automatically
 
+# OpenTelemetry distributed tracing configuration
+# Global config for current (vLLM) and future instrumented components (routing-sidecar, inference-scheduler, kv-cache, etc.)
+# Set enabled: true to enable tracing across all components
+# Override collector endpoint via helmfile set or by editing this value
+global:
+  tracing:
+    enabled: false  # Set to true to enable distributed tracing
+    otlpEndpoint: "http://opentelemetry-collector.monitoring.svc.cluster.local:4317"
+    sampling:
+      sampler: "parentbased_traceidratio"
+      samplerArg: "1.0"  # 100% sampling for demo (production: 0.1 = 10%)
+    serviceNames:
+      vllmDecode: "vllm-decode"
+      vllmPrefill: "vllm-prefill"
+    vllm:
+      collectDetailedTraces: "all"
+
 modelArtifacts:
   uri: "hf://meta-llama/Llama-3.2-3B-Instruct"
   size: 100Gi
@@ -41,11 +58,13 @@ decode:
       - "--disable-hybrid-kv-cache-manager"
       - "--max_model_len"
       - "8192"
+      # Tracing args (--otlp-traces-endpoint, --collect-detailed-traces) are injected from global.tracing
     env:
       - name: VLLM_CPU_NUM_OF_RESERVED_CPU
         value: "1"
       - name: VLLM_CPU_KVCACHE_SPACE
         value: "32"
+      # Tracing env vars (OTEL_SERVICE_NAME, etc.) are injected from global.tracing
     ports:
       - containerPort: 8000
         name: vllm

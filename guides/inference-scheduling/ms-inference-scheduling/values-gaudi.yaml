@@ -5,6 +5,23 @@
 # Custom vLLM image for Gaudi is used for now.
 # Use DRA instead of device plugins.
 
+# OpenTelemetry distributed tracing configuration
+# Global config for current (vLLM) and future instrumented components (routing-sidecar, inference-scheduler, kv-cache, etc.)
+# Set enabled: true to enable tracing across all components
+# Override collector endpoint via helmfile set or by editing this value
+global:
+  tracing:
+    enabled: false  # Set to true to enable distributed tracing
+    otlpEndpoint: "http://opentelemetry-collector.monitoring.svc.cluster.local:4317"
+    sampling:
+      sampler: "parentbased_traceidratio"
+      samplerArg: "1.0"  # 100% sampling for demo (production: 0.1 = 10%)
+    serviceNames:
+      vllmDecode: "vllm-decode"
+      vllmPrefill: "vllm-prefill"
+    vllm:
+      collectDetailedTraces: "all"
+
 modelArtifacts:
   name: meta-llama/Llama-3.1-8B-Instruct
   uri: "pvc+hf://model-pvc/meta-llama/Llama-3.1-8B-Instruct"
@@ -44,6 +61,7 @@ decode:
     - --max-seq-len-to-capture=2048
     - --max-model-len=2048
     - --max-num-batched-token=16000
+    # Tracing args (--otlp-traces-endpoint, --collect-detailed-traces) are injected from global.tracing
     env:
     - name: OMPI_MCA_btl_vader_single_copy_mechanism
       value: "none"
@@ -53,6 +71,7 @@ decode:
       value: "true"
     - name: DO_NOT_TRACK
       value: "1"
+    # Tracing env vars (OTEL_SERVICE_NAME, etc.) are injected from global.tracing
     ports:
       - containerPort: 8000
         name: "vllm"

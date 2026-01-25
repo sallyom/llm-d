@@ -1,6 +1,23 @@
 # This values.yaml file creates the resources for Qwen/Qwen3-0.6B
 multinode: false
 
+# OpenTelemetry distributed tracing configuration
+# Global config for current (vLLM) and future instrumented components (routing-sidecar, inference-scheduler, kv-cache, etc.)
+# Set enabled: true to enable tracing across all components
+# Override collector endpoint via helmfile set or by editing this value
+global:
+  tracing:
+    enabled: false  # Set to true to enable distributed tracing
+    otlpEndpoint: "http://opentelemetry-collector.monitoring.svc.cluster.local:4317"
+    sampling:
+      sampler: "parentbased_traceidratio"
+      samplerArg: "1.0"  # 100% sampling for demo (production: 0.1 = 10%)
+    serviceNames:
+      vllmDecode: "vllm-decode"
+      vllmPrefill: "vllm-prefill"
+    vllm:
+      collectDetailedTraces: "all"
+
 modelArtifacts:
   uri: "hf://Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8"
   size: 700Gi
@@ -42,6 +59,8 @@ decode:
         - --kv-cache-dtype=fp8
         - --async-scheduling
         - --gpu-memory-utilization=0.93
+        # Tracing args (--otlp-traces-endpoint, --collect-detailed-traces) are injected from global.tracing
+    # Tracing env vars (OTEL_SERVICE_NAME, etc.) are injected from global.tracing
     ports:
       - containerPort: 8000
         name: vllm

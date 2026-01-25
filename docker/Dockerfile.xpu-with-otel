@@ -1,0 +1,12 @@
+ARG BASE_IMAGE=ghcr.io/llm-d/llm-d-xpu:v0.4.0
+FROM ${BASE_IMAGE}
+
+# Install OpenTelemetry packages for vLLM tracing
+# suppress the python externally managed environment error
+RUN python3 -m pip config set global.break-system-packages true && \
+    pip install --no-cache-dir \
+    'opentelemetry-sdk>=1.39.1' \
+    'opentelemetry-api>=1.39.1' \
+    'opentelemetry-exporter-otlp>=1.39.1' \
+    'opentelemetry-semantic-conventions-ai>=0.4.13' \
+    'opentelemetry-instrumentation-fastapi>=0.60b1'

@@ -1,0 +1,10 @@
+ARG BASE_IMAGE=ghcr.io/llm-d/llm-d-cpu:v0.4.0
+FROM ${BASE_IMAGE}
+
+# Install OpenTelemetry packages for vLLM tracing
+RUN uv pip install \
+  'opentelemetry-sdk>=1.39.1' \
+  'opentelemetry-api>=1.39.1' \
+  'opentelemetry-exporter-otlp>=1.39.1' \
+  'opentelemetry-semantic-conventions-ai>=0.4.13' \
+  'opentelemetry-instrumentation-fastapi>=0.60b1'
