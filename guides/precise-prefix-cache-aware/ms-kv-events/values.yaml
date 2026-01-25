@@ -7,22 +7,25 @@ multinode: false
 # Override collector endpoint via helmfile set or by editing this value
 global:
   tracing:
-    enabled: false  # Set to true and uncomment tracing flags in custom command to enable
-    otlpEndpoint: "http://opentelemetry-collector.monitoring.svc.cluster.local:4317"
+    enabled: true  # Set to true and uncomment tracing flags in custom command to enable
+    #otlpEndpoint: "http://opentelemetry-collector.monitoring.svc.cluster.local:4317"
+    otlpEndpoint: "http://llm-d-collector-collector.observability-hub.svc.cluster.local:4317"
     sampling:
       sampler: "parentbased_traceidratio"
       samplerArg: "1.0"  # 100% sampling for demo (production: 0.1 = 10%)
     serviceNames:
-      vllmDecode: "vllm"
+      vllmDecode: "vllm-decode"
       vllmPrefill: "vllm-prefill"  # Not used in this guide (prefill.create=false)
     vllm:
       collectDetailedTraces: "all"
 
 modelArtifacts:
-  uri: "hf://Qwen/Qwen3-0.6B"
+  uri: "hf://meta-llama/Llama-3.1-8B-Instruct"
+  #uri: "hf://Qwen/Qwen3-0.6B"
   size: 20Gi
   authSecretName: "llm-d-hf-token"
-  name: "Qwen/Qwen3-0.6B"
+  name: "meta-llama/Llama-3.1-8B-Instruct"
+  #name: "Qwen/Qwen3-0.6B"
 
 routing:
   proxy:
@@ -33,37 +36,37 @@ accelerator: # controlls specialized hardware Type
 
 decode:
   create: true
-  replicas: 2
+  replicas: 4
   monitoring:
     podmonitor:
       enabled: true
       portName: "vllm"  # decode vLLM service port (from routing.proxy.targetPort)
       path: "/metrics"
-      interval: "30s"
+      interval: "5s"
   containers:
   - name: "vllm"
     # vLLM image - override for tracing-enabled builds or custom images
-    image: "ghcr.io/llm-d/llm-d-cuda:v0.4.0"
+    image: quay.io/sallyom/vllm:tracing-0.5
+    #image: "ghcr.io/llm-d/llm-d-cuda:v0.4.0"
     modelCommand: custom
     command:
       - /bin/sh
       - '-c'
     args:
       - |
-        vllm serve Qwen/Qwen3-0.6B \
+        vllm serve meta-llama/Llama-3.1-8B-Instruct \
         --host 0.0.0.0 \
         --port 8000 \
         --block-size 64 \
         --prefix-caching-hash-algo sha256_cbor \
         --kv-events-config "{\"enable_kv_cache_events\":true,\"publisher\":\"zmq\",\"endpoint\":\"tcp://gaie-${GAIE_RELEASE_NAME_POSTFIX}-epp.${NAMESPACE}.svc.cluster.local:5557\",\"topic\":\"kv@${POD_IP}@Qwen/Qwen3-0.6B\"}"
-        # Tracing args (uncomment to enable - not auto-injected with custom commands):
-        # --otlp-traces-endpoint http://opentelemetry-collector.monitoring.svc.cluster.local:4317 \
-        # --collect-detailed-traces all
+        --otlp-traces-endpoint http://opentelemetry-collector.monitoring.svc.cluster.local:4317 \
+        --collect-detailed-traces all
     env:
       - name: GAIE_RELEASE_NAME_POSTFIX # index 0 matters because of set in helmfile
       # Tracing env vars (uncomment to enable - not auto-injected with custom commands):
-      # - name: OTEL_SERVICE_NAME
-      #   value: "vllm"
+      - name: OTEL_SERVICE_NAME
+        value: "vllm-decode"
       - name: NAMESPACE
         valueFrom:
           fieldRef:

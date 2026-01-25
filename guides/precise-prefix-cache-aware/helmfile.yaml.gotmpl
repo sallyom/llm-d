@@ -40,8 +40,9 @@ releases:
 
   - name: {{ printf "gaie-%s" $rn | quote }}
     namespace: {{ $ns }}
-    chart: oci://registry.k8s.io/gateway-api-inference-extension/charts/inferencepool
-    version: v1.2.0
+    chart: ../../../gateway-api-inference-extension/config/charts/inferencepool/ 
+    #chart: oci://registry.k8s.io/gateway-api-inference-extension/charts/inferencepool
+    #version: v1.2.0
     installed: true
     needs:
       - {{ printf "infra-%s" $rn | quote }}
@@ -74,8 +75,9 @@ releases:
 
   - name: {{ printf "ms-%s" $rn | quote }}
     namespace: {{ $ns }}
-    chart: llm-d-modelservice/llm-d-modelservice
-    version: v0.3.17
+    chart: ../../../llm-d-modelservice/charts/llm-d-modelservice/
+    #chart: llm-d-modelservice/llm-d-modelservice
+    #version: v0.3.17
     installed: true
     needs:
       - {{ printf "infra-%s" $rn | quote }}

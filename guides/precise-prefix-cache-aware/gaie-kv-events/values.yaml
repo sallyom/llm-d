@@ -9,8 +9,10 @@ inferenceExtension:
     # both downstream infernece-scheduler and upstream epp images can support precise KV Cache awareness based on the configurations here
     ###################
     name: llm-d-inference-scheduler
-    hub: ghcr.io/llm-d
-    tag: v0.4.0
+    #hub: ghcr.io/llm-d
+    #tag: v0.4.0
+    hub: quay.io/sallyom
+    tag: tracing-0.5
     ###################
     # name: epp
     # hub: registry.k8s.io/gateway-api-inference-extension
@@ -47,9 +49,10 @@ inferenceExtension:
           parameters:
             indexerConfig:
               tokenProcessorConfig:
-                blockSize: 64   
+                blockSize: 64
                 hashSeed: "42"
               tokenizersPoolConfig:
+                modelName: "meta-llama/Llama-3.1-8B-Instruct"
                 hf:
                   tokenizersCacheDir: "/tmp/tokenizers"
         - type: kv-cache-utilization-scorer
@@ -82,9 +85,10 @@ inferenceExtension:
   # Set enabled: true to enable distributed tracing for EPP/GAIE
   # Override collector endpoint via helmfile set or by editing this value
   tracing:
-    enabled: false  # Set to true to enable distributed tracing
+    enabled: true  # Set to true to enable distributed tracing
     # OTLP endpoint for trace export
-    otelExporterEndpoint: "http://opentelemetry-collector.monitoring.svc.cluster.local:4317"
+    otelExporterEndpoint: "http://llm-d-collector-collector.observability-hub.svc.cluster.local:4317"
+    #otelExporterEndpoint: "http://opentelemetry-collector.monitoring.svc.cluster.local:4317"
     sampling:
       # Parent-based sampling with 100% trace ratio
       sampler: "parentbased_traceidratio"
