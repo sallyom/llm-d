@@ -1,0 +1,33 @@
+ARG BASE_IMAGE=vllm/vllm-openai:v0.14.1-cu130
+FROM ${BASE_IMAGE}
+USER root
+
+# Install OpenTelemetry packages for vLLM tracing
+RUN pip install --no-cache-dir \
+  'opentelemetry-sdk>=1.39.1' \
+  'opentelemetry-api>=1.39.1' \
+  'opentelemetry-exporter-otlp>=1.39.1' \
+  'opentelemetry-semantic-conventions-ai>=0.4.13' \
+  'opentelemetry-instrumentation-fastapi>=0.60b1'
+
+# Set up writeable cache directories for OpenShift
+# Override any existing HF_HOME and cache settings from base image
+ENV HF_HOME=/tmp/.huggingface \
+    TRITON_CACHE_DIR=/tmp/triton \
+    VLLM_CACHE_ROOT=/tmp/vllm \
+    OUTLINES_CACHE_DIR=/tmp/outlines \
+    NUMBA_CACHE_DIR=/tmp/numba \
+    TRANSFORMERS_CACHE=/tmp/.huggingface/hub \
+    HF_HUB_CACHE=/tmp/.huggingface/hub
+
+# Create cache directories and set permissions for OpenShift (group 0)
+# Ensure both user 2000 and group 0 can write to these directories
+RUN mkdir -p /tmp/.huggingface/hub /tmp/triton /tmp/vllm /tmp/outlines /tmp/numba && \
+    chmod -R 777 /tmp/.huggingface /tmp/triton /tmp/vllm /tmp/outlines /tmp/numba
+
+# Ensure home directory exists and is writeable
+RUN if [ ! -d /home/vllm ]; then mkdir -p /home/vllm; fi && \
+    chown -R 2000:0 /home/vllm && \
+    chmod -R g+rwX /home/vllm
+
+USER 2000

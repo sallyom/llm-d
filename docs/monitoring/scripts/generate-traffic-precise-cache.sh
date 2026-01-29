@@ -69,6 +69,7 @@ echo "Workers:      $CONCURRENT_WORKERS"
 echo "Duration:     $DURATION_MINUTES minutes"
 echo ""
 echo "This script creates traffic patterns to showcase:"
+echo "  ✓ LONG prompts (300+ chars) spanning multiple KV cache blocks"
 echo "  ✓ Shared prefix cache hits across requests"
 echo "  ✓ Cache-aware routing decisions (endpoint selection based on KV cache state)"
 echo "  ✓ Scoring breakdown (cache score vs queue score vs utilization score)"
@@ -131,6 +132,39 @@ REPEATED_PROMPTS=(
     "What is the difference between a Kubernetes Deployment and a StatefulSet?"
     "How does distributed tracing help debug microservices performance issues?"
     "Explain the prefill and decode phases in transformer-based LLM inference."
+)
+
+# LONG prompts with shared prefixes - designed to span multiple KV cache blocks (64 tokens each)
+# These prompts are 300+ characters (~100+ tokens) to ensure they span at least 2 blocks
+
+LONG_SHARED_PREFIX_K8S="In a production Kubernetes cluster running microservices at scale with hundreds of pods across multiple namespaces, consider the complexities of resource management, scheduling, networking, and observability. The cluster administrator needs to ensure optimal resource utilization, fair sharing among tenants, and reliable application performance. Given this context, explain in detail how"
+
+LONG_SUFFIX_VARIANTS_K8S=(
+    "the Kubernetes scheduler makes placement decisions using node affinity, pod affinity and anti-affinity rules, taints and tolerations, and resource requests and limits to ensure pods are optimally distributed across the cluster while respecting application-specific constraints and maintaining high availability."
+    "horizontal pod autoscaling (HPA) monitors application metrics and dynamically adjusts replica counts in response to changing workload patterns, including the role of metrics server, custom metrics from Prometheus, and external metrics from cloud providers in making scaling decisions."
+    "resource quotas and limit ranges work together to prevent resource exhaustion at the namespace level, including how they enforce constraints on CPU, memory, persistent volume claims, and object counts, and how they interact with pod priority and preemption mechanisms."
+    "the container network interface (CNI) plugins enable pod-to-pod communication across nodes, implement network policies for traffic segmentation, and integrate with service mesh solutions like Istio for advanced traffic management, observability, and security features."
+    "distributed tracing with OpenTelemetry can be implemented across microservices to capture request flows through the service mesh, including automatic instrumentation, manual span creation, context propagation through headers, and integration with backends like Jaeger and Tempo for trace visualization and analysis."
+)
+
+LONG_SHARED_PREFIX_LLM="When building a high-performance LLM inference serving system that needs to handle thousands of concurrent requests with low latency and high throughput, engineers must consider model optimization techniques, efficient memory management, batching strategies, and observability. The system uses vLLM for serving transformer-based models with features like paged attention, continuous batching, and prefix caching. In this architecture, describe comprehensively"
+
+LONG_SUFFIX_VARIANTS_LLM=(
+    "how prefix caching with block-level KV cache management reduces redundant computation for requests sharing common prompt prefixes, including the hash-based indexing mechanism, block eviction policies, and the trade-offs between cache hit rate and memory usage across multiple concurrent requests."
+    "how continuous batching differs fundamentally from static batching by allowing new requests to join in-flight batches during the decode phase, including the scheduling algorithms that determine batch composition, iteration-level scheduling decisions, and the impact on both throughput and latency percentiles."
+    "how paged attention manages KV cache memory more efficiently than contiguous allocation by organizing cache into fixed-size blocks that can be non-contiguously allocated, including the page table implementation, block sharing for prefix caching, and copy-on-write mechanisms during sequence forking."
+    "how tensor parallelism and pipeline parallelism enable serving large models that exceed single GPU memory capacity, including the communication patterns between GPUs, the trade-offs between different parallelism strategies, and how these interact with attention mechanisms and batch processing."
+    "how distributed tracing can provide deep observability into the inference pipeline, capturing spans for model loading, tokenization, prefill phase, decode iterations, KV cache operations, and batching decisions, with custom attributes that expose internal metrics like cache hit rates, batch utilization, and GPU memory usage."
+)
+
+LONG_SHARED_PREFIX_OBSERVABILITY="Modern cloud-native applications running on Kubernetes require comprehensive observability across multiple signal types including metrics, logs, and distributed traces. OpenTelemetry provides a vendor-neutral standard for collecting telemetry data with automatic instrumentation for common frameworks and manual instrumentation for custom logic. When implementing observability for a microservices architecture with distributed tracing, explain thoroughly"
+
+LONG_SUFFIX_VARIANTS_OBSERVABILITY=(
+    "how trace context propagation works using W3C traceparent and tracestate headers to maintain correlation across service boundaries, including the role of trace IDs, span IDs, parent-child relationships, and how baggage is used to carry request-scoped data through the distributed system without explicit parameter passing."
+    "how sampling strategies balance observability coverage with storage and performance costs, comparing head-based sampling that makes decisions at trace creation, tail-based sampling that examines complete traces, and adaptive sampling that adjusts rates based on error conditions, latency thresholds, or other runtime characteristics."
+    "how span processors and exporters buffer, batch, and transmit telemetry data to backend systems, including the trade-offs between synchronous and asynchronous export, retry logic for handling backend failures, and best practices for minimizing the performance impact of instrumentation on production services."
+    "how semantic conventions standardize attribute naming and values across different telemetry signals, enabling consistent querying and correlation between traces, metrics, and logs, including domain-specific conventions for HTTP, database, messaging, and custom application attributes."
+    "how trace querying languages like TraceQL enable sophisticated analysis of distributed traces through filtering by span attributes, aggregating metrics across traces, identifying performance anomalies, and correlating with other observability signals to debug complex failure modes in production systems."
 )
 
 # Send request with custom headers for better tracing
@@ -225,6 +259,33 @@ worker_cache_pattern() {
                 max_tokens=150
                 cache_pattern="SHARED_PREFIX_LLM"
                 sleep_time=0.4
+                ;;
+
+            "long_shared_k8s")
+                # LONG prompts with shared K8s prefix - spans multiple KV cache blocks
+                suffix_idx=$(( RANDOM % ${#LONG_SUFFIX_VARIANTS_K8S[@]} ))
+                prompt="${LONG_SHARED_PREFIX_K8S} ${LONG_SUFFIX_VARIANTS_K8S[$suffix_idx]}"
+                max_tokens=200
+                cache_pattern="LONG_SHARED_K8S"
+                sleep_time=0.6
+                ;;
+
+            "long_shared_llm")
+                # LONG prompts with shared LLM prefix - spans multiple KV cache blocks
+                suffix_idx=$(( RANDOM % ${#LONG_SUFFIX_VARIANTS_LLM[@]} ))
+                prompt="${LONG_SHARED_PREFIX_LLM} ${LONG_SUFFIX_VARIANTS_LLM[$suffix_idx]}"
+                max_tokens=200
+                cache_pattern="LONG_SHARED_LLM"
+                sleep_time=0.6
+                ;;
+
+            "long_shared_observability")
+                # LONG prompts with shared observability prefix - spans multiple KV cache blocks
+                suffix_idx=$(( RANDOM % ${#LONG_SUFFIX_VARIANTS_OBSERVABILITY[@]} ))
+                prompt="${LONG_SHARED_PREFIX_OBSERVABILITY} ${LONG_SUFFIX_VARIANTS_OBSERVABILITY[$suffix_idx]}"
+                max_tokens=200
+                cache_pattern="LONG_SHARED_OBSERVABILITY"
+                sleep_time=0.6
                 ;;
 
             "mixed_cache_aware")
@@ -325,12 +386,15 @@ worker_cache_pattern() {
 
 # Distribute workers across cache-focused patterns
 patterns=(
-    "exact_repeats"           # Worker 1: Maximum cache hits
-    "shared_prefix_k8s"       # Worker 2: Partial K8s prefix hits
-    "shared_prefix_tracing"   # Worker 3: Partial tracing prefix hits
-    "shared_prefix_llm"       # Worker 4: Partial LLM prefix hits
-    "mixed_cache_aware"       # Worker 5+: Realistic production mix
-    "warmup_then_repeat"      # Worker 6+: Show warmup → cache hit transition
+    "long_shared_k8s"         # Worker 1: LONG K8s prompts spanning multiple blocks
+    "long_shared_llm"         # Worker 2: LONG LLM prompts spanning multiple blocks
+    "long_shared_observability" # Worker 3: LONG observability prompts spanning multiple blocks
+    "exact_repeats"           # Worker 4: Maximum cache hits (short prompts)
+    "shared_prefix_k8s"       # Worker 5: Partial K8s prefix hits (short)
+    "shared_prefix_tracing"   # Worker 6: Partial tracing prefix hits (short)
+    "shared_prefix_llm"       # Worker 7: Partial LLM prefix hits (short)
+    "mixed_cache_aware"       # Worker 8+: Realistic production mix
+    "warmup_then_repeat"      # Worker 9+: Show warmup → cache hit transition
 )
 
 # Start workers in background
@@ -394,10 +458,13 @@ echo "Success Rate:    $(awk "BEGIN {printf \"%.1f\", $success * 100 / $total}")
 echo "Avg Throughput:  ${throughput} req/s"
 echo ""
 echo "Worker Distribution:"
-echo "  - Exact Repeats:        Identical prompts → maximum cache hits"
-echo "  - Shared Prefix (K8s):  Common K8s prefix → partial cache hits"
-echo "  - Shared Prefix (Trace): Common tracing prefix → partial cache hits"
-echo "  - Shared Prefix (LLM):  Common LLM prefix → partial cache hits"
+echo "  - LONG Shared K8s:      300+ char prompts spanning 2+ KV cache blocks → strong prefix hits"
+echo "  - LONG Shared LLM:      300+ char prompts spanning 2+ KV cache blocks → strong prefix hits"
+echo "  - LONG Shared Observ:   300+ char prompts spanning 2+ KV cache blocks → strong prefix hits"
+echo "  - Exact Repeats:        Identical short prompts → maximum cache hits"
+echo "  - Shared Prefix (K8s):  Common K8s prefix → partial cache hits (short prompts)"
+echo "  - Shared Prefix (Trace): Common tracing prefix → partial cache hits (short prompts)"
+echo "  - Shared Prefix (LLM):  Common LLM prefix → partial cache hits (short prompts)"
 echo "  - Mixed Cache-Aware:    Realistic production traffic (repeats + prefixes + unique)"
 echo "  - Warmup then Repeat:   Shows cache warmup phase vs cache hit phase"
 echo ""

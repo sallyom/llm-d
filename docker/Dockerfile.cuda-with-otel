@@ -3,7 +3,7 @@ FROM ${BASE_IMAGE}
 USER root
 
 # Install OpenTelemetry packages for vLLM tracing
-RUN uv pip install \
+RUN uv pip install --system \
   'opentelemetry-sdk>=1.39.1' \
   'opentelemetry-api>=1.39.1' \
   'opentelemetry-exporter-otlp>=1.39.1' \
