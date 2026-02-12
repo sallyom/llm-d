@@ -52,6 +52,13 @@ inferenceExtension:
               weight: 2.0
             - pluginRef: max-score-picker
 
+  # Distributed tracing configuration (OpenTelemetry)
+  tracing:
+    enabled: false
+    # otelExporterEndpoint: "http://jaeger-collector.observability.svc.cluster.local:4317"
+    # sampling:
+    #   sampler: "parentbased_traceidratio"
+    #   samplerArg: "0.1"
   monitoring:
     secret:
       name: kv-events-gateway-sa-metrics-reader-secret
