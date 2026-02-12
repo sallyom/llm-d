@@ -112,6 +112,11 @@ We suggest the [inference scheduling](./guides/inference-scheduling/README.md) w
 
 `llm-d` is composed of multiple component repositories and derives from both vLLM and Inference Gateway upstreams. Please see the individual repositories for more guidance on development.
 
+## 🔍 Observability
+
+- [Monitoring & Metrics](./docs/monitoring/README.md) - Prometheus, Grafana dashboards, and PromQL queries
+- [Distributed Tracing](./docs/monitoring/tracing/README.md) - OpenTelemetry tracing across vLLM, routing proxy, and EPP
+
 ## 📦 Releases
 
 Our [guides](./guides/README.md) are living docs and kept current. For details about the Helm charts and component releases, visit our [GitHub Releases page](https://github.com/llm-d/llm-d/releases) to review release notes.

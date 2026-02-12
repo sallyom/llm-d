@@ -113,6 +113,10 @@ EPP provides additional metrics for request routing, scheduling latency, and plu
 
 EPP metrics include request rates, error rates, scheduling latency, and plugin processing times, providing insights into the inference routing and scheduling performance.
 
+## Distributed Tracing
+
+llm-d supports OpenTelemetry distributed tracing across vLLM, the routing proxy, and the EPP/inference scheduler. See [Distributed Tracing](./tracing/README.md) for setup instructions including a quick-start Jaeger deployment, or use the [install-jaeger.sh](./scripts/install-jaeger.sh) script for a one-command setup.
+
 ## Dashboards
 
 Grafana dashboard raw JSON files can be imported manually into a Grafana UI. Here is a current list of community dashboards:
