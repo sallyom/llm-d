@@ -6,18 +6,19 @@ This guide demonstrates how to configure the inference scheduler to use the new 
 
 ## Hardware Requirements
 
-This example out of the box uses 16 GPUs (8 replicas x 2 GPUs each) of any supported kind:
+This example out of the box uses 4 GPUs (2 replicas x 2 GPUs each) of any supported kind:
 
 - **NVIDIA GPUs**: Any NVIDIA GPU (support determined by the inferencing image used)
 - **Intel XPU/GPUs**: Intel Data Center GPU Max 1550 or compatible Intel XPU device
 
-**Using fewer accelerators**: Fewer accelerators can be used by modifying the `values.yaml` corresponding to your deployment. For example, to use only 2 GPUs with the default NVIDIA GPU deployment, update `replicas: 2` in [ms-kv-events/values.yaml](./ms-kv-events/values.yaml#L16-L21).
+The recommended open model for this guide is `Qwen/Qwen3-32B`, which fits the default 4-GPU NVIDIA profile here while still being large enough to make prefix-cache-aware routing behavior obvious.
 
 ## Prerequisites
 
 - Have the [proper client tools installed on your local system](../prereq/client-setup/README.md) to use this guide.
 - Configure and deploy your [Gateway control plane](../prereq/gateway-provider/README.md).
 - Have the [Monitoring stack](../../docs/monitoring/README.md) installed on your system.
+- Install an OpenTelemetry collector in the same namespace if you want to use the tracing that is enabled in this guide. See [Distributed Tracing](../../docs/monitoring/tracing/README.md).
 - Create a namespace for installation.
 
   ```bash
@@ -35,6 +36,14 @@ Use the helmfile to compose and install the stack. The Namespace in which the st
 ### Deploy
 
 ```bash
+cd guides/precise-prefix-cache-aware
+helmfile apply -n ${NAMESPACE}
+```
+
+For a 4-GPU OpenShift deployment with the default NVIDIA values:
+
+```bash
+export NAMESPACE=llmd-sallyom
 cd guides/precise-prefix-cache-aware
 helmfile apply -n ${NAMESPACE}
 ```
@@ -124,12 +133,6 @@ pod/gaie-kv-events-epp-9c9849bf6-ftcfb                        1/1     Running   
 pod/infra-kv-events-inference-gateway-istio-df9977d89-5zp6z   1/1     Running     0          16h
 pod/ms-kv-events-llm-d-modelservice-decode-548bfbc7d6-dqv8d   1/1     Running     0          16h
 pod/ms-kv-events-llm-d-modelservice-decode-548bfbc7d6-fcbmf   1/1     Running     0          16h
-pod/ms-kv-events-llm-d-modelservice-decode-548bfbc7d6-frpk8   1/1     Running     0          16h
-pod/ms-kv-events-llm-d-modelservice-decode-548bfbc7d6-g72ls   1/1     Running     0          16h
-pod/ms-kv-events-llm-d-modelservice-decode-548bfbc7d6-kf8r8   1/1     Running     0          16h
-pod/ms-kv-events-llm-d-modelservice-decode-548bfbc7d6-kqhd2   1/1     Running     0          16h
-pod/ms-kv-events-llm-d-modelservice-decode-548bfbc7d6-t8srp   1/1     Running     0          16h
-pod/ms-kv-events-llm-d-modelservice-decode-548bfbc7d6-vnnnv   1/1     Running     0          16h
 
 NAME                                              TYPE           CLUSTER-IP   EXTERNAL-IP   PORT(S)                        AGE
 service/gaie-kv-events-epp                        ClusterIP   172.30.193.29    <none>        9002/TCP,9090/TCP,5600/TCP   16h
@@ -139,12 +142,12 @@ service/infra-kv-events-inference-gateway-istio   ClusterIP   172.30.18.110    <
 NAME                                                      READY   UP-TO-DATE   AVAILABLE   AGE
 deployment.apps/gaie-kv-events-epp                        1/1     1            1           16h
 deployment.apps/infra-kv-events-inference-gateway-istio   1/1     1            1           16h
-deployment.apps/ms-kv-events-llm-d-modelservice-decode    8/8     8            8           16h
+deployment.apps/ms-kv-events-llm-d-modelservice-decode    2/2     2            2           16h
 
 NAME                                                                DESIRED   CURRENT   READY   AGE
 replicaset.apps/gaie-kv-events-epp-9c9849bf6                        1         1         1       16h
 replicaset.apps/infra-kv-events-inference-gateway-istio-df9977d89   1         1         1       16h
-replicaset.apps/ms-kv-events-llm-d-modelservice-decode-548bfbc7d6   8         8         8       16h
+replicaset.apps/ms-kv-events-llm-d-modelservice-decode-548bfbc7d6   2         2         2       16h
 ```
 
 **_NOTE:_** This assumes no other guide deployments in your given `${NAMESPACE}` and you have not changed the default release names via the `${RELEASE_NAME}` environment variable.

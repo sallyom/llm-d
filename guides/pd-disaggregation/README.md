@@ -2,17 +2,17 @@
 
 ## Overview
 
-This guide demonstrates how to deploy GPT-OSS-120B using vLLM's P/D disaggregation support with NIXL. This guide has been validated on:
+This guide demonstrates how to deploy a smaller open model, `Qwen/Qwen3-32B`, using vLLM's P/D disaggregation support with NIXL. This guide has been validated on:
 
 * an 8xH200 cluster with InfiniBand networking
 * an 8xH200 cluster on GKE with RoCE networking
 
 > WARNING: We are still investigating and optimizing performance for other hardware and networking configurations
 
-In this example, we will demonstrate a deployment of `openai/gpt-oss-120b` with:
+For the 4-GPU demo profile in this guide, we deploy `Qwen/Qwen3-32B` with:
 
-* 4 TP=1 Prefill Workers
-* 1 TP=4 Decode Worker
+* 1 TP=2 Prefill Worker
+* 1 TP=2 Decode Worker
 
 ## P/D Best Practices
 
@@ -25,7 +25,7 @@ improving interactivity. For a given ITL goal, P/D disaggregation can benefit ov
 
 However, P/D disaggregation is not a target for all workloads. We suggest exploring P/D disaggregation for workloads with:
 
-* Large models (e.g. gpt-oss-120b+, not gpt-oss-20B)
+* Larger models (for example `Qwen/Qwen3-32B` and above)
 * Longer input sequence lengths (e.g 10k ISL | 1k OSL, not 200 ISL | 200 OSL)
 * Sparse MoE architectures with opportunities for wide-EP
 
@@ -38,7 +38,7 @@ For very large models leveraging wide-EP, traffic for KV cache transfer may cont
 
 ## Hardware Requirements
 
-This guide expects 8 Nvidia GPUs of any kind, and RDMA via InfiniBand or RoCE between all pods in the workload.
+This guide's OpenShift demo profile expects 4 NVIDIA GPUs total and RDMA via InfiniBand or RoCE between the P/D pods in the workload.
 
 ### Intel HPU Hardware Requirements
 
@@ -51,6 +51,7 @@ For Intel HPU deployments:
 * Ensure your cluster infrastructure is sufficient to [deploy high scale inference](../prereq/infrastructure)
 * Configure and deploy your [Gateway control plane](../prereq/gateway-provider/README.md).
 * Have the [Monitoring stack](../../docs/monitoring/README.md) installed on your system.
+* Install an OpenTelemetry collector in the same namespace if you want to use the tracing that is enabled in this guide. See [Distributed Tracing](../../docs/monitoring/tracing/README.md).
 * Create a namespace for installation.
 
   ```bash
@@ -69,7 +70,15 @@ Use the helmfile to compose and install the stack. The Namespace in which the st
 
 ```bash
 cd guides/pd-disaggregation
-helmfile apply -n ${NAMESPACE}
+helmfile apply -e ocp -n ${NAMESPACE}
+```
+
+For an OpenShift deployment using the 4-GPU demo profile described above:
+
+```bash
+export NAMESPACE=llmd-sallyom
+cd guides/pd-disaggregation
+helmfile apply -e ocp -n ${NAMESPACE}
 ```
 **For Intel HPU deployments**, use the HPU-specific environment:
 
@@ -196,12 +205,14 @@ In this example, we deployed the user guide on GKE using the modified [Gateway o
 ```bash
 helmfile apply -e gke_pd_rdma -n ${NAMESPACE}
 ```
-This setup serves the `openai/gpt-oss-120b` model using the following specifications:
+This benchmark setup serves the `openai/gpt-oss-120b` model using the following specifications:
 
 * Provider: GKE
 * Prefill: 1 instance with TP=8
 * Decode: 1 instance with TP=8
 * 2 `a3-ultragpu-8g` VMs, 16 GPUs
+
+This benchmark section describes the larger validated GKE reference deployment. For the OpenShift demo path in this guide, use the 4-GPU `Qwen/Qwen3-32B` profile described above instead.
 
 ### Verify the correctness
 
@@ -219,7 +230,7 @@ Ensure that vLLM debug logging is enabled. Submit the following request to your 
 curl -i http://<your_endpoint>/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "openai/gpt-oss-120b",
+    "model": "Qwen/Qwen3-32B",
     "messages": [
       {
         "role": "user",

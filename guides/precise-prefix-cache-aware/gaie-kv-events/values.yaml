@@ -100,11 +100,11 @@ inferenceExtension:
 
   # Distributed tracing configuration (OpenTelemetry)
   tracing:
-    enabled: false
-    # otelExporterEndpoint: "http://otel-collector:4317"
-    # sampling:
-    #   sampler: "parentbased_traceidratio"
-    #   samplerArg: "0.1"
+    enabled: true
+    otelExporterEndpoint: "http://otel-collector:4317"
+    sampling:
+      sampler: "parentbased_traceidratio"
+      samplerArg: "1.0"
   # Monitoring configuration for EPP
   monitoring:
     interval: "10s"

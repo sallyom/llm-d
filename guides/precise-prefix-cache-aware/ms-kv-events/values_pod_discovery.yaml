@@ -1,12 +1,11 @@
 multinode: false
 
-# Distributed tracing configuration (OpenTelemetry)
-# tracing:
-#   enabled: true
-#   otlpEndpoint: "http://otel-collector:4317"
-#   sampling:
-#     sampler: "parentbased_traceidratio"
-#     samplerArg: "0.1"
+tracing:
+  enabled: true
+  otlpEndpoint: "http://otel-collector:4317"
+  sampling:
+    sampler: "parentbased_traceidratio"
+    samplerArg: "1.0"
 
 modelArtifacts:
   uri: "hf://Qwen/Qwen3-32B"
@@ -32,7 +31,7 @@ decode:
   parallelism:
     tensor: 2
     data: 1
-  replicas: 8
+  replicas: 2
   monitoring:
     podmonitor:
       enabled: true
@@ -130,4 +129,3 @@ decode:
 
 prefill:
   create: false
-
