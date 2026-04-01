@@ -16,6 +16,8 @@ environments:
       - ../prereq/gateway-provider/common-configurations/gke.yaml
   gke_tpu: &GKETPU
     <<: *GKE
+  gemma4: &GEMMA4
+    <<: *I
   amd: &AMD
     <<: *I
   xpu: &XPU
@@ -24,6 +26,8 @@ environments:
   hpu: &HPU
     <<: *I
   ocp: &OCP
+    <<: *I
+  ocp_gemma4: &OCPGEMMA4
     <<: *I
   aks: &AKS
     <<: *I
@@ -73,7 +77,7 @@ releases:
               enabled: true
     {{- end }}
     # Apply destination rule for anything istio
-    {{- if or (eq .Environment.Name "istio") (eq .Environment.Name "default") (eq .Environment.Name "aks") (eq .Environment.Name "amd") (eq .Environment.Name "xpu") (eq .Environment.Name "hpu") (eq .Environment.Name "ocp") }}
+    {{- if or (eq .Environment.Name "istio") (eq .Environment.Name "default") (eq .Environment.Name "aks") (eq .Environment.Name "amd") (eq .Environment.Name "xpu") (eq .Environment.Name "hpu") (eq .Environment.Name "ocp") (eq .Environment.Name "gemma4") (eq .Environment.Name "ocp_gemma4") }}
       - provider:
           name: {{ .Environment.Values.provider.name }}
           istio:
@@ -83,7 +87,7 @@ releases:
             destinationRule:
               host: {{ printf "gaie-%s-epp.%s.svc.cluster.local" $rn $ns | quote }}
     {{- end }}
-    {{- if or (eq .Environment.Name "istio") (eq .Environment.Name "default") }}
+    {{- if or (eq .Environment.Name "istio") (eq .Environment.Name "default") (eq .Environment.Name "gemma4") (eq .Environment.Name "ocp_gemma4") }}
       - inferenceExtension:
           flags:
             {{ .Environment.Values.inferenceExtension.flags | toYaml | nindent 12 }}
@@ -106,8 +110,12 @@ releases:
       - ms-pd/values_xpu.yaml
     {{- else if eq .Environment.Name "hpu" }}
       - ms-pd/values_hpu.yaml
+    {{- else if eq .Environment.Name "ocp_gemma4" }}
+      - ms-pd/values_ocp_gemma4_4gpu.yaml
     {{- else if eq .Environment.Name "ocp" }}
       - ms-pd/values_ocp_rdma.yaml
+    {{- else if eq .Environment.Name "gemma4" }}
+      - ms-pd/values_gemma4_4gpu.yaml
     {{- else if eq .Environment.Name "gke_tpu" }}
       - ms-pd/values_tpu.yaml
     {{- else if eq .Environment.Name "gke_pd_rdma" }}
@@ -115,7 +123,7 @@ releases:
     {{- else }}
       - ms-pd/values.yaml
     {{- end }}
-    {{- if or (eq .Environment.Name "istio") (eq .Environment.Name "default") }}
+    {{- if or (eq .Environment.Name "istio") (eq .Environment.Name "default") (eq .Environment.Name "gemma4") (eq .Environment.Name "ocp_gemma4") }}
       - routing:
           {{ .Environment.Values.routing | toYaml | nindent 10 }}
     {{- end }}

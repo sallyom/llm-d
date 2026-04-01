@@ -26,6 +26,8 @@ The install script deploys both an OTel Collector and Jaeger all-in-one into a n
 
 If the [OpenTelemetry Operator](https://opentelemetry.io/docs/kubernetes/operator/) is installed, the script deploys the collector as an `OpenTelemetryCollector` CR ([otel-collector-operator.yaml](./otel-collector-operator.yaml)). Otherwise it uses a standalone Deployment ([otel-collector.yaml](./otel-collector.yaml)).
 
+The `-n` flag is required. Use the same namespace as your llm-d workload so the chart defaults that point to `http://otel-collector:4317` resolve correctly.
+
 Access the Jaeger UI:
 
 ```bash

@@ -11,7 +11,7 @@ This example out of the box uses 4 GPUs (2 replicas x 2 GPUs each) of any suppor
 - **NVIDIA GPUs**: Any NVIDIA GPU (support determined by the inferencing image used)
 - **Intel XPU/GPUs**: Intel Data Center GPU Max 1550 or compatible Intel XPU device
 
-The recommended open model for this guide is `Qwen/Qwen3-32B`, which fits the default 4-GPU NVIDIA profile here while still being large enough to make prefix-cache-aware routing behavior obvious.
+The recommended open models for this guide are `Qwen/Qwen3-32B` and `google/gemma-4-26B-A4B-it`, both of which fit the default 4-GPU NVIDIA profile here while still being large enough to make prefix-cache-aware routing behavior obvious.
 
 ## Prerequisites
 
@@ -40,12 +40,26 @@ cd guides/precise-prefix-cache-aware
 helmfile apply -n ${NAMESPACE}
 ```
 
+For Gemma 4 on 4 NVIDIA GPUs:
+
+```bash
+export NAMESPACE=llm-d-precise
+cd guides/precise-prefix-cache-aware
+helmfile apply -e gemma4 -n ${NAMESPACE}
+```
+
 For a 4-GPU OpenShift deployment with the default NVIDIA values:
 
 ```bash
 export NAMESPACE=llmd-sallyom
 cd guides/precise-prefix-cache-aware
 helmfile apply -n ${NAMESPACE}
+```
+
+If your local environment uses Helm 4 and `helmfile apply` fails in the `helm diff` plugin, use:
+
+```bash
+helmfile sync -n ${NAMESPACE}
 ```
 
 **_Experimental_**: Pod Discovery Mode
@@ -112,6 +126,20 @@ kubectl apply -f httproute.yaml -n ${NAMESPACE}
 kubectl apply -f httproute.gke.yaml -n ${NAMESPACE}
 ```
 
+### OpenShift access options
+
+For OpenShift demo traffic, `kubectl port-forward` is the most reliable path, especially when the cluster is behind a corporate proxy or Route TLS interception adds extra certificate handling.
+
+```bash
+kubectl port-forward -n ${NAMESPACE} service/infra-kv-events-inference-gateway-istio 8000:80
+```
+
+If you still want an OpenShift Route, apply the provided manifest instead of using `oc expose`, which may bind the Route to Istio's status port (`15021`) instead of the inference port:
+
+```bash
+kubectl apply -f route.yaml -n ${NAMESPACE}
+```
+
 ## Verify the Installation
 
 - Firstly, you should be able to list all helm releases to view the 3 charts got installed into your chosen namespace:
@@ -160,12 +188,13 @@ We have docs on getting started sending inference requests [available here](../.
 
 ```bash
 kubectl port-forward -n ${NAMESPACE} service/infra-kv-events-inference-gateway-istio 8000:80
+export ENDPOINT=http://localhost:8000
 export LONG_TEXT_200_WORDS="Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum. Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum."
 
-curl -s http://localhost:8000/v1/completions \
+curl -s ${ENDPOINT}/v1/completions \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "Qwen/Qwen3-32B",
+    "model": "google/gemma-4-26B-A4B-it",
     "prompt": "'"$LONG_TEXT_200_WORDS"'",
     "max_tokens": 50
   }' | jq

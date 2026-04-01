@@ -148,6 +148,7 @@ To populate metrics (especially error metrics) for testing and monitoring valida
 
 - [Traffic Generation Script](./scripts/generate-traffic-basic.sh) - Sends both valid and malformed requests to generate metrics
 - [P/D Traffic Generator](./scripts/generate-traffic-pd.sh) - Concurrent traffic optimized for P/D disaggregation tracing
+- [Agentic Traffic Generator](./scripts/generate-traffic-agentic.sh) - Concurrent tool-calling traffic optimized for agentic workflows, repeated prefixes, and precise prefix-cache-aware routing
 
 ## Troubleshooting
 

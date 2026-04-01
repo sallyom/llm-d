@@ -14,6 +14,59 @@ For the 4-GPU demo profile in this guide, we deploy `Qwen/Qwen3-32B` with:
 * 1 TP=2 Prefill Worker
 * 1 TP=2 Decode Worker
 
+## Recommended Guide for Gemma 4 on 4 GPUs
+
+For `google/gemma-4-26B-A4B-it` on a single 4-GPU node, we recommend this `pd-disaggregation` guide rather than `wide-ep-lws`.
+
+`wide-ep-lws` is currently a multi-node, 32-GPU well-lit path tuned for very large MoE deployments such as DeepSeek-R1 over RDMA fabrics. Gemma 4 26B-A4B is an MoE model, but according to the current vLLM Gemma 4 recipe it can run in BF16 on a single 80 GB GPU, so a 4-GPU deployment does not need the current WideEP baseline. On 4 GPUs, a simpler 2-GPU prefill plus 2-GPU decode layout is the safer starting point.
+
+This guide now includes Gemma 4 4-GPU values with tracing enabled:
+
+* `helmfile apply -e gemma4 -n ${NAMESPACE}` for the standard Istio-based path
+* `helmfile apply -e ocp_gemma4 -n ${NAMESPACE}` for the existing OpenShift 4-GPU RDMA demo path
+
+Both profiles:
+
+* switch the model to `google/gemma-4-26B-A4B-it`
+* use `1 TP=2` prefill and `1 TP=2` decode workers
+* enable distributed tracing for vLLM, routing proxy, and the inference scheduler
+* pin the modelserver image to `ghcr.io/llm-d/llm-d-cuda-dev:pr-1082`, which includes Gemma 4 support
+
+If you keep the older `ghcr.io/llm-d/llm-d-cuda:v0.5.1` image, vLLM will fail during startup because that image does not include Gemma 4 support.
+
+## Upstream vLLM Fallback for Gemma 4
+
+If the current `llm-d` Gemma 4 images are not usable in your environment, this guide also includes a standalone upstream vLLM fallback manifest at [upstream-vllm-gemma4-openshift.yaml](./upstream-vllm-gemma4-openshift.yaml).
+
+This fallback deploys:
+
+* `vllm/vllm-openai:gemma4`
+* `google/gemma-4-26B-A4B-it`
+* a single `TP=4` vLLM pod on one 4-GPU node
+* OpenTelemetry export to `otel-collector:4317`
+* OpenAI-compatible tool calling for agentic workloads
+
+It is useful when you need to validate Gemma 4 serving and tracing on 4 GPUs without depending on the full `llm-d` control plane.
+
+Apply it with:
+
+```bash
+kubectl apply -f guides/pd-disaggregation/upstream-vllm-gemma4-openshift.yaml -n ${NAMESPACE}
+```
+
+Then access it with:
+
+```bash
+kubectl port-forward -n ${NAMESPACE} service/gemma4-openai 8000:8000
+curl -s http://localhost:8000/v1/models | jq
+```
+
+The manifest is intentionally OpenShift-demo-oriented:
+
+* it pins to a specific GPU node via `nodeSelector`
+* it assumes a Hugging Face token secret named `llm-d-hf-token`
+* it writes Hugging Face, Triton, and TorchInductor caches into a writable `emptyDir`
+
 ## P/D Best Practices
 
 P/D disaggregation provides more flexibility in navigating the trade-off between throughput and interactivity([ref](https://arxiv.org/html/2506.05508v1)).
@@ -80,12 +133,34 @@ export NAMESPACE=llmd-sallyom
 cd guides/pd-disaggregation
 helmfile apply -e ocp -n ${NAMESPACE}
 ```
+
+If your local environment uses Helm 4 and `helmfile apply` fails in the `helm diff` plugin, use:
+
+```bash
+helmfile sync -e ocp -n ${NAMESPACE}
+```
 **For Intel HPU deployments**, use the HPU-specific environment:
 
 ```bash
 export NAMESPACE=llm-d-pd
 cd guides/pd-disaggregation
 helmfile apply -e hpu -n ${NAMESPACE}
+```
+
+**For Gemma 4 on 4 NVIDIA GPUs**, use one of the Gemma-specific environments:
+
+```bash
+export NAMESPACE=llm-d-pd
+cd guides/pd-disaggregation
+helmfile apply -e gemma4 -n ${NAMESPACE}
+```
+
+For the OpenShift 4-GPU RDMA demo path:
+
+```bash
+export NAMESPACE=llm-d-pd
+cd guides/pd-disaggregation
+helmfile apply -e ocp_gemma4 -n ${NAMESPACE}
 ```
 
 **_NOTE:_** You can set the `$RELEASE_NAME_POSTFIX` env variable to change the release names. This is how we support concurrent installs. Ex: `RELEASE_NAME_POSTFIX=pd-2 helmfile apply -n ${NAMESPACE}`
@@ -125,6 +200,20 @@ kubectl apply -f httproute.yaml -n ${NAMESPACE}
 
 ```bash
 kubectl apply -f httproute.gke.yaml -n ${NAMESPACE}
+```
+
+### OpenShift access options
+
+For OpenShift demo traffic, `kubectl port-forward` is the most reliable path, especially when the cluster is behind a corporate proxy or Route TLS interception adds extra certificate handling.
+
+```bash
+kubectl port-forward -n ${NAMESPACE} service/infra-pd-inference-gateway-istio 8000:80
+```
+
+If you still want an OpenShift Route, apply the provided manifest instead of using `oc expose`, which may bind the Route to Istio's status port (`15021`) instead of the inference port:
+
+```bash
+kubectl apply -f route.yaml -n ${NAMESPACE}
 ```
 
 ## Verify the Installation

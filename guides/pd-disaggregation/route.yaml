@@ -1,0 +1,11 @@
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: infra-pd-inference-gateway-istio
+spec:
+  to:
+    kind: Service
+    name: infra-pd-inference-gateway-istio
+    weight: 100
+  port:
+    targetPort: 80

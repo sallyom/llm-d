@@ -11,6 +11,8 @@ environments:
   gke: &GKE
     values:
       - ../prereq/gateway-provider/common-configurations/gke.yaml
+  gemma4: &GEMMA4
+    <<: *I
   xpu: &XPU
     <<: *I
   xpu-agentgateway: &XPU_AG
@@ -51,8 +53,12 @@ releases:
     needs:
       - {{ printf "infra-%s" $rn | quote }}
     values:
-      {{- if eq $pd "true" }}
+      {{- if and (eq $pd "true") (eq .Environment.Name "gemma4") }}
+      - gaie-kv-events/values_gemma4_pod_discovery.yaml
+      {{- else if eq $pd "true" }}
       - gaie-kv-events/values_pod_discovery.yaml
+      {{- else if eq .Environment.Name "gemma4" }}
+      - gaie-kv-events/values_gemma4.yaml
       {{- else }}
       - gaie-kv-events/values.yaml
       {{- end }}
@@ -64,7 +70,7 @@ releases:
           monitoring:
             prometheus:
               enabled: true
-    {{- else if or (eq .Environment.Name "istio") (eq .Environment.Name "xpu") (eq .Environment.Name "default") }}
+    {{- else if or (eq .Environment.Name "istio") (eq .Environment.Name "xpu") (eq .Environment.Name "default") (eq .Environment.Name "gemma4") }}
       - provider:
           name: {{ .Environment.Values.provider.name }}
           istio:
@@ -89,15 +95,19 @@ releases:
     {{- if eq $pd "true" }}
       {{- if or (eq .Environment.Name "xpu") (eq .Environment.Name "xpu-agentgateway") }}
       - ms-kv-events/values_xpu_pod_discovery.yaml
+      {{- else if eq .Environment.Name "gemma4" }}
+      - ms-kv-events/values_gemma4_pod_discovery.yaml
       {{- else }}
       - ms-kv-events/values_pod_discovery.yaml
       {{- end }}
     {{- else if or (eq .Environment.Name "xpu") (eq .Environment.Name "xpu-agentgateway") }}
       - ms-kv-events/values_xpu.yaml
+    {{- else if eq .Environment.Name "gemma4" }}
+      - ms-kv-events/values_gemma4.yaml
     {{- else }}
       - ms-kv-events/values.yaml
     {{- end }}
-    {{- if or (eq .Environment.Name "istio") (eq .Environment.Name "default") }}
+    {{- if or (eq .Environment.Name "istio") (eq .Environment.Name "default") (eq .Environment.Name "gemma4") }}
       - routing:
           {{ .Environment.Values.routing | toYaml | nindent 10 }}
     {{- end }}

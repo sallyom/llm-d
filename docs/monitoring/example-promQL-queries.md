@@ -57,17 +57,21 @@ The provided [load generation script](./scripts/generate-traffic-basic.sh) will 
 | **EPP Prefix Indexer Hit Bytes P50** | `histogram_quantile(0.50, sum by(le) (rate(inference_extension_prefix_indexer_hit_bytes_bucket[5m])))` |
 | **EPP Prefix Indexer Hit Bytes P90** | `histogram_quantile(0.90, sum by(le) (rate(inference_extension_prefix_indexer_hit_bytes_bucket[5m])))` |
 
-### Path D: P/D Disaggregation
+### Path D: Disaggregation (P/D + Encode)
 
 | Metric Need | PromQL Query |
 | ----------- | ------------ |
 | **Prefill Worker Utilization** | `avg by(pod) (vllm:num_requests_running{pod=~".*prefill.*"})` |
 | **Decode Worker Utilization** | `avg by(pod) (vllm:kv_cache_usage_perc{pod=~".*decode.*"})` |
 | **Prefill Queue Length** | `sum by(pod) (vllm:num_requests_waiting{pod=~".*prefill.*"})` |
-| **P/D Decision Rate** | `sum by(decision_type) (rate(llm_d_inference_scheduler_pd_decision_total[5m]))` |
-| **Decode-Only Request Rate** | `sum(rate(llm_d_inference_scheduler_pd_decision_total{decision_type="decode-only"}[5m]))` |
-| **Prefill-Decode Request Rate** | `sum(rate(llm_d_inference_scheduler_pd_decision_total{decision_type="prefill-decode"}[5m]))` |
-| **P/D Decision Ratio** | `sum(rate(llm_d_inference_scheduler_pd_decision_total{decision_type="prefill-decode"}[5m])) / sum(rate(llm_d_inference_scheduler_pd_decision_total[5m]))` |
+| **Disagg Decision Rate** | `sum by(decision_type) (rate(llm_d_inference_scheduler_disagg_decision_total[5m]))` |
+| **Decode-Only Request Rate** | `sum(rate(llm_d_inference_scheduler_disagg_decision_total{decision_type="decode-only"}[5m]))` |
+| **Prefill-Decode Request Rate** | `sum(rate(llm_d_inference_scheduler_disagg_decision_total{decision_type="prefill-decode"}[5m]))` |
+| **Encode-Decode Request Rate** | `sum(rate(llm_d_inference_scheduler_disagg_decision_total{decision_type="encode-decode"}[5m]))` |
+| **Encode-Prefill-Decode Request Rate** | `sum(rate(llm_d_inference_scheduler_disagg_decision_total{decision_type="encode-prefill-decode"}[5m]))` |
+| **Prefill-Decode Decision Ratio** | `sum(rate(llm_d_inference_scheduler_disagg_decision_total{decision_type="prefill-decode"}[5m])) / sum(rate(llm_d_inference_scheduler_disagg_decision_total[5m]))` |
+
+> Legacy note: deployments using the deprecated `pd-profile-handler` expose `llm_d_inference_scheduler_pd_decision_total` with only `decode-only` and `prefill-decode`.
 
 ### Path E: Flow Control & Request Queuing (requires the flow control FeatureGate enabled with EPP)
 
@@ -110,11 +114,11 @@ The following metrics from community-gathered monitoring requirements are not cu
 - **Prefix Cache Memory Usage (Absolute)**: Only percentage utilization is available
 - **Cache Eviction Rate**: KV cache residency metrics are available when `--kv-cache-metrics-enabled` is set: `vllm:kv_block_lifetime_seconds`, `vllm:kv_block_idle_before_evict_seconds`, `vllm:kv_block_reuse_gap_seconds`
 
-### Path D: P/D Disaggregation
+### Path D: Disaggregation
 
 - **KV Cache Transfer Times**: No metrics track the latency of transferring KV cache between prefill and decode workers
 
 ### Workarounds
 
 - **Cache Pressure Detection**: Monitor trends in `vllm:prefix_cache_hits_total` / `vllm:prefix_cache_queries_total` - declining hit rates may indicate cache evictions
-- **Transfer Bottlenecks**: Monitor overall latency spikes during P/D operations as an indirect indicator
+- **Transfer Bottlenecks**: Monitor overall latency spikes during disaggregation operations as an indirect indicator
